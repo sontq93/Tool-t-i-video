@@ -57,10 +57,8 @@ jobs:
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --onefile --windowed \
-            --name "TikTokDownloader_V4" \
-            --add-binary "yt-dlp.exe;." \
-            app_tai_video_v4.py
+          pyinstaller --noconfirm --onefile --windowed --name "TikTokDownloader_V4" --add-binary "yt-dlp.exe;." app_tai_video_v4.py
+        shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
         if: matrix.os == 'macos-latest'
