@@ -51,7 +51,7 @@ class VideoDownloaderApp(ctk.CTk):
         super().__init__()
 
         # Window Config
-        self.title("Video Downloader Pro v6.0")
+        self.title("Video Downloader Pro v6.1")
         self.geometry("1100x700")
         self.configure(fg_color=COLORS["bg_main"])  # App background
 

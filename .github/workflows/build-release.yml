@@ -33,6 +33,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          architecture: 'x64' # Force Intel x64 to build compatible binary on ARM runner
 
       - name: Install Dependencies
         run: |
@@ -53,7 +54,6 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed \
             --name "VideoDownloaderProV6" \
             --add-binary "yt-dlp:." \
-            --target-arch universal2 \
             --hidden-import "PIL" \
             --hidden-import "PIL._tkinter_finder" \
             --collect-all "customtkinter" \
