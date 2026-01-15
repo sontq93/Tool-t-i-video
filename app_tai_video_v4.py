@@ -673,13 +673,23 @@ frame_list_section.pack(fill="both", expand=True, padx=15, pady=5)
 frame_list = tk.Frame(frame_list_section, bg="#ecf0f1")
 frame_list.pack(fill="both", expand=True)
 
-scrollbar_y = tk.Scrollbar(frame_list)
+# Scrollbar dọc
+scrollbar_y = tk.Scrollbar(frame_list, orient="vertical")
 scrollbar_y.pack(side=tk.RIGHT, fill="y")
+
+# Scrollbar ngang
 scrollbar_x = tk.Scrollbar(frame_list, orient="horizontal")
 scrollbar_x.pack(side=tk.BOTTOM, fill="x")
 
 columns = ("check", "idx", "title", "status")
-tree = ttk.Treeview(frame_list, columns=columns, show="headings", yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+tree = ttk.Treeview(
+    frame_list, 
+    columns=columns, 
+    show="headings", 
+    height=15,  # Hiển thị tối đa 15 dòng, sau đó phải scroll
+    yscrollcommand=scrollbar_y.set, 
+    xscrollcommand=scrollbar_x.set
+)
 
 tree.heading("check", text="✓")
 tree.column("check", width=40, anchor="center")
@@ -693,7 +703,7 @@ tree.column("title", width=550)
 tree.heading("status", text="Trạng Thái / Tiến Độ")
 tree.column("status", width=200, anchor="center")
 
-tree.pack(fill="both", expand=True)
+tree.pack(fill="both", expand=True, pady=(0, 0))
 
 scrollbar_y.config(command=tree.yview)
 scrollbar_x.config(command=tree.xview)
