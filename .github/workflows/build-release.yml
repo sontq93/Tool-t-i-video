@@ -1,0 +1,115 @@
+name: Build TikTok Downloader
+
+on:
+  # Tự động chạy khi push tag mới (ví dụ: v5.0)
+  push:
+    tags:
+      - 'v*'
+  # Hoặc chạy thủ công từ GitHub UI
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            artifact_name: TikTokDownloader_V4.app
+            yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
+            yt_dlp_name: yt-dlp
+          - os: windows-latest
+            artifact_name: TikTokDownloader_V4.exe
+            yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+            yt_dlp_name: yt-dlp.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Download yt-dlp
+        run: |
+          curl -L ${{ matrix.yt_dlp_url }} -o ${{ matrix.yt_dlp_name }}
+        shell: bash
+
+      - name: Make yt-dlp executable (macOS only)
+        if: matrix.os == 'macos-latest'
+        run: chmod +x yt-dlp
+
+      - name: Build with PyInstaller (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed \
+            --name "TikTokDownloader_V4" \
+            --add-binary "yt-dlp:." \
+            app_tai_video_v4.py
+
+      - name: Build with PyInstaller (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed \
+            --name "TikTokDownloader_V4" \
+            --add-binary "yt-dlp.exe;." \
+            app_tai_video_v4.py
+
+      - name: Remove macOS Gatekeeper attributes
+        if: matrix.os == 'macos-latest'
+        run: xattr -cr dist/TikTokDownloader_V4.app
+
+      - name: Zip macOS app
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r TikTokDownloader_V4_macOS.zip TikTokDownloader_V4.app
+
+      - name: Upload artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TikTokDownloader_V4_macOS
+          path: dist/TikTokDownloader_V4_macOS.zip
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TikTokDownloader_V4_Windows
+          path: dist/TikTokDownloader_V4.exe
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TikTokDownloader_V4_macOS
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TikTokDownloader_V4_Windows
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            TikTokDownloader_V4_macOS.zip
+            TikTokDownloader_V4.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

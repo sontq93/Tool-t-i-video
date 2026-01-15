@@ -1,0 +1,41 @@
+# Build directories
+build/
+dist/
+*.app
+*.exe
+
+# PyInstaller files
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git lock
+.git/index.lock
+
+# Downloaded binaries (sẽ build lại)
+yt-dlp
+yt-dlp.exe
+
+# Temporary files
+titles.txt
+*.tmp
