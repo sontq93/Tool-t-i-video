@@ -12,6 +12,12 @@ import json
 import urllib.request
 import re
 
+# Constant for hiding console window on Windows
+if platform.system() == "Windows":
+    SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
+else:
+    SUBPROCESS_FLAGS = 0
+
 # Queue để nhận yêu cầu cập nhật giao diện từ luồng khác
 gui_queue = queue.Queue()
 
@@ -121,7 +127,7 @@ def scan_videos_thread():
             
             log_msg(f"🔍 Đang quét (nhanh): {link[:50]}...")
             
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
             stdout, stderr = process.communicate()
             
             # Nếu cách 1 thất bại -> Thử CÁCH 2: FULL SCAN
@@ -145,7 +151,7 @@ def scan_videos_thread():
                 if var_cookies.get():
                     cmd_full.extend(["--cookies-from-browser", "chrome"])
                     
-                process = subprocess.Popen(cmd_full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore')
+                process = subprocess.Popen(cmd_full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
                 stdout, stderr = process.communicate()
                 
                 if process.returncode != 0:
@@ -289,7 +295,8 @@ def tai_video_thread():
                     stderr=subprocess.STDOUT,
                     text=True,
                     universal_newlines=True,
-                    cwd=save_folder
+                    cwd=save_folder,
+                    creationflags=SUBPROCESS_FLAGS
                 )
                 
                 for line in process.stdout:
@@ -395,7 +402,8 @@ def direct_download_thread():
                 stderr=subprocess.STDOUT,
                 text=True,
                 universal_newlines=True,
-                cwd=save_folder
+                cwd=save_folder,
+                creationflags=SUBPROCESS_FLAGS
             )
             
             for line in process.stdout:
@@ -474,12 +482,19 @@ main_canvas = tk.Canvas(window, bg="#f0f0f0", highlightthickness=0)
 main_scrollbar = tk.Scrollbar(window, orient="vertical", command=main_canvas.yview)
 scrollable_frame = tk.Frame(main_canvas, bg="#f0f0f0")
 
-scrollable_frame.bind(
-    "<Configure>",
-    lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
-)
+# Update scroll region khi frame thay đổi kích thước
+def _configure_scroll_region(event):
+    main_canvas.configure(scrollregion=main_canvas.bbox("all"))
 
-main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+# Set width của scrollable_frame bằng width của canvas
+def _configure_canvas_width(event):
+    canvas_width = event.width
+    main_canvas.itemconfig(canvas_window, width=canvas_width)
+
+scrollable_frame.bind("<Configure>", _configure_scroll_region)
+main_canvas.bind("<Configure>", _configure_canvas_width)
+
+canvas_window = main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 main_canvas.configure(yscrollcommand=main_scrollbar.set)
 
 main_canvas.pack(side="left", fill="both", expand=True)
