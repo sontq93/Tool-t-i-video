@@ -4,8 +4,8 @@ dist/
 *.app
 *.exe
 
-# PyInstaller files
-*.spec
+# PyInstaller spec files are needed for build, don't ignore them
+# *.spec
 
 # Python cache
 __pycache__/
