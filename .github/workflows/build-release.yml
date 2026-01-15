@@ -12,16 +12,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-12, windows-latest] # Downgrade to macos-12 (Intel) to bypass macos-13 retirement
+        os: [macos-latest, windows-latest] # Back to latest (Fast queue)
         include:
-          - os: macos-12
-            artifact_name: VideoDownloaderProV5.app
-            zip_name: VideoDownloaderProV5_macOS.zip
+          - os: macos-latest
+            artifact_name: VideoDownloaderProV6.app
+            zip_name: VideoDownloaderProV6_macOS.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
             yt_dlp_name: yt-dlp
           - os: windows-latest
-            artifact_name: VideoDownloaderProV5.exe
-            zip_name: VideoDownloaderProV5_Windows.zip
+            artifact_name: VideoDownloaderProV6.exe
+            zip_name: VideoDownloaderProV6_Windows.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
             yt_dlp_name: yt-dlp.exe
 
@@ -44,15 +44,16 @@ jobs:
         shell: bash
 
       - name: Make yt-dlp executable (macOS only)
-        if: matrix.os == 'macos-12'
+        if: matrix.os == 'macos-latest'
         run: chmod +x yt-dlp
 
       - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-12'
+        if: matrix.os == 'macos-latest'
         run: |
           pyinstaller --noconfirm --onefile --windowed \
-            --name "VideoDownloaderProV5" \
+            --name "VideoDownloaderProV6" \
             --add-binary "yt-dlp:." \
+            --target-arch universal2 \
             --hidden-import "PIL" \
             --hidden-import "PIL._tkinter_finder" \
             --collect-all "customtkinter" \
@@ -61,32 +62,32 @@ jobs:
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV5" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --collect-all "customtkinter" app_v5.py
+          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV6" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --collect-all "customtkinter" app_v5.py
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
-        if: matrix.os == 'macos-12'
-        run: xattr -cr dist/VideoDownloaderProV5.app
+        if: matrix.os == 'macos-latest'
+        run: xattr -cr dist/VideoDownloaderProV6.app
 
       - name: Zip macOS app
-        if: matrix.os == 'macos-12'
+        if: matrix.os == 'macos-latest'
         run: |
           cd dist
-          zip -r VideoDownloaderProV5_macOS.zip VideoDownloaderProV5.app
+          zip -r VideoDownloaderProV6_macOS.zip VideoDownloaderProV6.app
 
       - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-12'
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloaderProV5_macOS
-          path: dist/VideoDownloaderProV5_macOS.zip
+          name: VideoDownloaderProV6_macOS
+          path: dist/VideoDownloaderProV6_macOS.zip
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloaderProV5_Windows
-          path: dist/VideoDownloaderProV5.exe
+          name: VideoDownloaderProV6_Windows
+          path: dist/VideoDownloaderProV6.exe
 
   release:
     name: Create Release
@@ -98,19 +99,19 @@ jobs:
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: VideoDownloaderProV5_macOS
+          name: VideoDownloaderProV6_macOS
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: VideoDownloaderProV5_Windows
+          name: VideoDownloaderProV6_Windows
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            VideoDownloaderProV5_macOS.zip
-            VideoDownloaderProV5.exe
+            VideoDownloaderProV6_macOS.zip
+            VideoDownloaderProV6.exe
           draft: false
           prerelease: false
         env:
