@@ -359,6 +359,7 @@ class VideoDownloaderApp(ctk.CTk):
     def clear_list(self):
         # Maps to "Hủy bỏ" which mainly deselects all or clears
         self.toggle_all_checkboxes(False)
+        self.var_select_all.set(False) # Uncheck header
 
     # --- LOGIC IMPLEMENTATION ---
 
@@ -492,6 +493,19 @@ class VideoDownloaderApp(ctk.CTk):
         else:
              self.process_entries(entries, link)
 
+    def format_duration(self, seconds):
+        if not seconds: return "N/A"
+        try:
+            seconds = int(seconds)
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
+            s = seconds % 60
+            if h > 0:
+                return f"{h}:{m:02}:{s:02}"
+            else:
+                return f"{m}:{s:02}"
+        except: return str(seconds)
+
     def process_entries(self, entries, original_url):
         def update_ui():
             self.lbl_count.configure(text=f"Đã tìm thấy {len(entries)} video")
@@ -504,7 +518,14 @@ class VideoDownloaderApp(ctk.CTk):
             for idx, entry in enumerate(entries, 1):
                 title = entry.get('title', 'No Title')
                 vid_id = entry.get('id', 'Unknown')
-                duration = entry.get('duration_string') or str(entry.get('duration', 'N/A'))
+                
+                # Format Duration
+                raw_duration = entry.get('duration')
+                duration_str = entry.get('duration_string')
+                if raw_duration:
+                    duration = self.format_duration(raw_duration)
+                else: 
+                     duration = duration_str or "N/A"
                 
                 # Url
                 web_url = entry.get('webpage_url') or entry.get('url')
@@ -518,14 +539,23 @@ class VideoDownloaderApp(ctk.CTk):
                 display_title = f"{display_type} {title}"
                 
                 # Add to UI
-                self.add_video_item(idx, display_title, vid_id, duration, "Best", thumb_url)
+                # FIX: Must populate data BEFORE adding item because add_video_item tries to access video_data_map[idx]
                 
-                # Store data
+                # Check history
+                is_downloaded = self.check_history(vid_id)
+                if is_downloaded:
+                     display_title = f"[Đã Tải] {display_title}"
+
+                # Store data first
                 self.video_data_map[idx] = {
                     "url": web_url or original_url,
                     "title": title,
-                    "id": vid_id
+                    "id": vid_id,
+                    "is_downloaded": is_downloaded
                 }
+
+                self.add_video_item(idx, display_title, vid_id, duration, "Best", thumb_url, is_downloaded)
+
         
         self.gui_queue.put(update_ui)
 
@@ -556,13 +586,28 @@ class VideoDownloaderApp(ctk.CTk):
              def update_label():
                  if label_widget.winfo_exists():
                      label_widget.configure(image=ctk_img, text="") 
+                     label_widget.image = ctk_img # FIX: Keep reference to avoid GC
                      print("DEBUG: Thumbnail updated on UI")
              
              self.gui_queue.put(update_label)
         except Exception as e:
             print(f"ERROR loading thumb {url}: {e}")
 
-    def add_video_item(self, idx, title, vid_id, duration, quality, thumb_url=None):
+    def check_history(self, vid_id):
+        try:
+            if not os.path.exists("history.txt"): return False
+            with open("history.txt", "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            return vid_id in lines
+        except: return False
+
+    def add_to_history(self, vid_id):
+        try:
+            with open("history.txt", "a", encoding="utf-8") as f:
+                f.write(vid_id + "\n")
+        except: pass
+
+    def add_video_item(self, idx, title, vid_id, duration, quality, thumb_url=None, is_downloaded=False):
         # Row Frame (White bg, defaults to white but hover changes it)
         row = ctk.CTkFrame(self.scroll_frame, fg_color=COLORS["white"], corner_radius=0)
         row.pack(fill="x")
@@ -578,11 +623,12 @@ class VideoDownloaderApp(ctk.CTk):
         f_chk.pack(side="left", fill="y")
         f_chk.pack_propagate(False)
         
-        var_chk = ctk.BooleanVar(value=True)
+        var_chk = ctk.BooleanVar(value=not is_downloaded) # Default unchecked if downloaded
         # Store
         if idx in self.video_data_map: self.video_data_map[idx]['var_chk'] = var_chk
         
-        def on_toggle(): self.update_selection_count()
+        def on_toggle(): 
+             self.update_selection_count()
         
         chk = ctk.CTkCheckBox(f_chk, text="", variable=var_chk, width=20, height=20, corner_radius=4,
                               fg_color=COLORS["blue_primary"], hover_color=COLORS["blue_primary"], border_width=2,
@@ -743,7 +789,9 @@ class VideoDownloaderApp(ctk.CTk):
              if is_mp3:
                  cmd.extend(["-x", "--audio-format", "mp3"])
              else:
-                 cmd.extend(["-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4"])
+                 # FIX Priority: MP4 > MOV > AVI > WMV > MKV > FLV > Best
+                 # Using single file best variant to avoid merge issues (no ffmpeg)
+                 cmd.extend(["-f", "best[ext=mp4]/best[ext=mov]/best[ext=avi]/best[ext=wmv]/best[ext=mkv]/best[ext=flv]/best", "--merge-output-format", "mp4"])
 
              # Thumb
              if self.var_thumb.get():
@@ -762,6 +810,8 @@ class VideoDownloaderApp(ctk.CTk):
              if process.returncode == 0:
                  update_status("✅ Hoàn tất", COLORS["green_success"])
                  success_count += 1
+                 if item.get('id'): self.add_to_history(item.get('id')) # Add to history
+
              else:
                  update_status("❌ Lỗi", COLORS["border"]) # Redish?
         
