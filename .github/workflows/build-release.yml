@@ -12,9 +12,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-13, windows-latest] # Use macos-13 (Intel) for better compatibility
+        os: [macos-15, windows-latest] # Use macos-15 as suggested (macos-13 retired)
         include:
-          - os: macos-13
+          - os: macos-15
             artifact_name: VideoDownloaderProV5.app
             zip_name: VideoDownloaderProV5_macOS.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
@@ -44,11 +44,11 @@ jobs:
         shell: bash
 
       - name: Make yt-dlp executable (macOS only)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15'
         run: chmod +x yt-dlp
 
       - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15'
         run: |
           pyinstaller --noconfirm --onefile --windowed \
             --name "VideoDownloaderProV5" \
@@ -65,17 +65,17 @@ jobs:
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15'
         run: xattr -cr dist/VideoDownloaderProV5.app
 
       - name: Zip macOS app
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15'
         run: |
           cd dist
           zip -r VideoDownloaderProV5_macOS.zip VideoDownloaderProV5.app
 
       - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15'
         uses: actions/upload-artifact@v4
         with:
           name: VideoDownloaderProV5_macOS
