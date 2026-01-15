@@ -12,9 +12,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest] # Back to latest (Fast queue)
+        os: [macos-12, windows-latest] # Revert to macos-12 (Intel) for stability. Slow but sure.
         include:
-          - os: macos-latest
+          - os: macos-12
             artifact_name: VideoDownloaderProV6.app
             zip_name: VideoDownloaderProV6_macOS.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
@@ -33,7 +33,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          architecture: 'x64' # Force Intel x64 to build compatible binary on ARM runner
+          # architecture: 'x64' # Removed, native on macos-12
 
       - name: Install Dependencies
         run: |
@@ -45,11 +45,11 @@ jobs:
         shell: bash
 
       - name: Make yt-dlp executable (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-12'
         run: chmod +x yt-dlp
 
       - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-12'
         run: |
           pyinstaller --noconfirm --onefile --windowed \
             --name "VideoDownloaderProV6" \
@@ -66,17 +66,17 @@ jobs:
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-12'
         run: xattr -cr dist/VideoDownloaderProV6.app
 
       - name: Zip macOS app
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-12'
         run: |
           cd dist
           zip -r VideoDownloaderProV6_macOS.zip VideoDownloaderProV6.app
 
       - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-12'
         uses: actions/upload-artifact@v4
         with:
           name: VideoDownloaderProV6_macOS
