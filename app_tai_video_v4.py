@@ -468,9 +468,34 @@ tk.Label(
     bg="#2c3e50"
 ).pack()
 
+# --- SCROLLABLE CONTAINER CHO TOÀN BỘ APP ---
+# Tạo Canvas với scrollbar để có thể scroll toàn bộ nội dung
+main_canvas = tk.Canvas(window, bg="#f0f0f0", highlightthickness=0)
+main_scrollbar = tk.Scrollbar(window, orient="vertical", command=main_canvas.yview)
+scrollable_frame = tk.Frame(main_canvas, bg="#f0f0f0")
+
+scrollable_frame.bind(
+    "<Configure>",
+    lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+)
+
+main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+main_canvas.configure(yscrollcommand=main_scrollbar.set)
+
+main_canvas.pack(side="left", fill="both", expand=True)
+main_scrollbar.pack(side="right", fill="y")
+
+# Enable mouse wheel scrolling
+def _on_mousewheel(event):
+    main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+main_canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows/Mac
+main_canvas.bind_all("<Button-4>", lambda e: main_canvas.yview_scroll(-1, "units"))  # Linux scroll up
+main_canvas.bind_all("<Button-5>", lambda e: main_canvas.yview_scroll(1, "units"))  # Linux scroll down
+
 # --- HƯỚNG DẪN SỬ DỤNG ---
 frame_guide = tk.LabelFrame(
-    window, 
+    scrollable_frame,  # Thay window thành scrollable_frame 
     text="📖 HƯỚNG DẪN SỬ DỤNG NHANH", 
     font=("Arial", 11, "bold"), 
     bg="#fff3cd",
@@ -507,7 +532,7 @@ tk.Label(
 
 # --- PHẦN 1: NHẬP LINK ---
 frame_input_section = tk.LabelFrame(
-    window, 
+    scrollable_frame, 
     text="📌 BƯỚC 1: Nhập Link Video/Kênh", 
     font=("Arial", 11, "bold"), 
     bg="#ecf0f1",
@@ -545,7 +570,7 @@ tk.Button(
 
 # --- PHẦN 2: TÙY CHỌN ---
 frame_options_section = tk.LabelFrame(
-    window, 
+    scrollable_frame, 
     text="⚙️ BƯỚC 2: Cài Đặt Tùy Chọn", 
     font=("Arial", 11, "bold"), 
     bg="#ecf0f1",
@@ -585,7 +610,7 @@ tk.Label(frame_opt_r2, text="(tùy chỉnh)", font=("Arial", 8), fg="gray", bg="
 
 # --- PHẦN 3: HÀNH ĐỘNG ---
 frame_action_section = tk.LabelFrame(
-    window, 
+    scrollable_frame, 
     text="🎬 BƯỚC 3: Chọn Hành Động", 
     font=("Arial", 11, "bold"), 
     bg="#ecf0f1",
@@ -660,7 +685,7 @@ tk.Label(
 
 # --- PHẦN 4: DANH SÁCH VIDEO ---
 frame_list_section = tk.LabelFrame(
-    window, 
+    scrollable_frame, 
     text="📋 DANH SÁCH VIDEO (Sau khi Quét)", 
     font=("Arial", 11, "bold"), 
     bg="#ecf0f1",
@@ -763,7 +788,7 @@ tk.Button(
 
 # --- PHẦN 5: ĐIỀU KHIỂN TẢI ---
 frame_download_section = tk.LabelFrame(
-    window, 
+    scrollable_frame, 
     text="🎯 ĐIỀU KHIỂN TẢI", 
     font=("Arial", 11, "bold"), 
     bg="#ecf0f1",
