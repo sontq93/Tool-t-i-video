@@ -1,41 +1,25 @@
-# Build directories
+# Media
+*.mp4
+*.m4a
+*.mp3
+*.webm
+
+# System
+.DS_Store
+
+# Python / Build
+__pycache__/
 build/
 dist/
-*.app
-*.exe
-
-# PyInstaller spec files are needed for build, don't ignore them
-# *.spec
-
-# Python cache
-__pycache__/
+*.spec
 *.pyc
-*.pyo
-*.pyd
-.Python
-
-# Virtual environment
 venv/
 env/
-ENV/
+.env
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Backups
+app_v5_old.py
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Git lock
-.git/index.lock
-
-# Downloaded binaries (sẽ build lại)
+# Binaries
 yt-dlp
 yt-dlp.exe
-
-# Temporary files
-titles.txt
-*.tmp

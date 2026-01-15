@@ -40,29 +40,53 @@ stop_flag = False
 # Lưu trữ dữ liệu video sau khi scan
 video_data_map = {} 
 
-# Modern color palette
+# UX/UI Design System - Premium Desktop Theme
 COLORS = {
-    'bg_main': '#f5f7fa',
-    'card_bg': '#ffffff',
-    'text_primary': '#2d3748',
-    'text_secondary': '#718096',
-    'accent_primary': '#667eea',
-    'accent_success': '#48bb78',
-    'accent_warning': '#ed8936',
-    'accent_danger': '#f56565',
-    'border': '#e2e8f0',
-    'header_bg': '#2c3e50',
-    'header_accent': '#3498db'
+    'bg_main': '#F8FAFC',       # Slate-50: Background
+    'card_bg': '#FFFFFF',       # White: Card background
+    'text_primary': '#1E293B',  # Slate-800: Main text
+    'text_secondary': '#64748B',# Slate-500: Subtext
+    'step_title': '#3B82F6',    # Blue-500: Highlight for Steps
+    'primary': '#3B82F6',       # Blue-500: Primary Action
+    'primary_hover': '#2563EB', # Blue-600: Primary Hover
+    'secondary': '#F1F5F9',     # Slate-100: Secondary Button/Bg
+    'secondary_hover': '#E2E8F0', # Slate-200: Secondary Hover
+    'border': '#E2E8F0',        # Slate-200: Subtle borders
+    'input_bg': '#FFFFFF',
+    'input_focus': '#3B82F6',   # Focus ring
+    'success': '#10B981',
+    'warning': '#F59E0B',
+    'error': '#EF4444',
+    'white': '#FFFFFF',
+    'shadow': '#E2E8F0'         # Simulated shadow color
 }
 
-# Modern fonts
+# Typography
+SYSTEM_FONT = "Segoe UI" if platform.system() == "Windows" else "Helvetica Neue"
 FONTS = {
-    'heading': ('Segoe UI', 16, 'bold'),
-    'subheading': ('Segoe UI', 12, 'bold'),
-    'body': ('Segoe UI', 10),
-    'button': ('Segoe UI', 11, 'bold'),
-    'small': ('Segoe UI', 9)
+    'heading': (SYSTEM_FONT, 18, 'bold'),
+    'step_title': (SYSTEM_FONT, 15, 'bold'), # Slightly smaller, refined
+    'body': (SYSTEM_FONT, 13),
+    'body_bold': (SYSTEM_FONT, 13, 'bold'),
+    'small': (SYSTEM_FONT, 11),
+    'button': (SYSTEM_FONT, 13, 'bold')
 } 
+
+# --- UI HELPERS ---
+def add_hover(widget, bg_normal, bg_hover):
+    """Add simple hover effect to widgets"""
+    widget.bind("<Enter>", lambda e: widget.config(bg=bg_hover))
+    widget.bind("<Leave>", lambda e: widget.config(bg=bg_normal))
+
+def style_input(entry):
+    """Style input fields with focus effect"""
+    entry.config(relief="flat", highlightthickness=1, highlightbackground=COLORS['border'], highlightcolor=COLORS['input_focus'], bg=COLORS['input_bg'])
+
+def create_card(parent):
+    """Create a standard container card without heavy borders"""
+    frame = tk.Frame(parent, bg=COLORS['card_bg'])
+    # Optional: Add simulated shadow line at bottom if needed, or just clean white
+    return frame 
 
 def check_queue():
     """Hàm kiểm tra hàng đợi để cập nhật giao diện (chạy trên main thread)"""
@@ -109,7 +133,7 @@ def scan_videos_thread():
     """Quét danh sách video từ link"""
     link = entry_link.get().strip()
     if not link:
-        messagebox.showwarning("⚠️ Thiếu Link", "Vui lòng nhập link trước khi quét!")
+        messagebox.showinfo("Nhắc nhở", "Vui lòng dán link video hoặc kênh vào ô bên dưới trước khi tiếp tục.")
         return
         
     # Auto fix Facebook link
@@ -129,84 +153,123 @@ def scan_videos_thread():
 
     def run_scan():
         try:
-            # CÁCH 1: FAST SCAN (Flat Playlist)
-            cmd = [
-                TOOL_PATH, 
-                "--flat-playlist", 
-                "--dump-single-json",
-                "--no-check-certificate", 
-                "--ignore-errors",
-                link
-            ]
+            # Check if YouTube Channel to scan both Videos and Shorts
+            # Exclude youtu.be (short links for single videos)
+            is_youtube_channel = ("youtube.com" in link) and ("youtu.be" not in link)
             
-            # UA FIX FOR FACEBOOK
-            if "facebook.com" in link or "fb.watch" in link:
-                cmd.extend(["--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"])
+            # Simple heuristic: if it has @username or /channel/ or /c/ AND is not a specific video
+            if is_youtube_channel and ("/videos" not in link and "/shorts" not in link and "watch?v=" not in link):
+                log_msg(f"🔍 Phát hiện kênh YouTube, đang quét cả Video và Shorts...")
+                
+                # 1. Scan Videos
+                log_msg(f"⏳ Đang quét danh sách Videos dài...")
+                link_videos = link.rstrip("/") + "/videos"
+                cmd_v = cmd.copy()
+                cmd_v[-1] = link_videos
+                
+                print(f"DEBUG: Executing {cmd_v}")
+                process_v = subprocess.Popen(cmd_v, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+                stdout_v, stderr_v = process_v.communicate()
+                print(f"DEBUG: Videos stdout len={len(stdout_v)}, stderr={stderr_v[:100]}")
+                
+                # 2. Scan Shorts
+                log_msg(f"⏳ Đang quét danh sách Shorts...")
+                link_shorts = link.rstrip("/") + "/shorts"
+                cmd_s = cmd.copy()
+                cmd_s[-1] = link_shorts
+                
+                print(f"DEBUG: Executing {cmd_s}")
+                process_s = subprocess.Popen(cmd_s, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+                stdout_s, stderr_s = process_s.communicate()
+                print(f"DEBUG: Shorts stdout len={len(stdout_s)}, stderr={stderr_s[:100]}")
+
+                # Parse & Merge
+                entries = []
+                try:
+                    if stdout_v.strip():
+                        data_v = json.loads(stdout_v)
+                        if 'entries' in data_v: 
+                            ev = list(data_v['entries'])
+                            entries.extend(ev)
+                            log_msg(f"   + Tìm thấy {len(ev)} videos dài")
+                        else: entries.append(data_v)
+                except Exception as e:
+                    print(f"DEBUG: Error parsing Videos: {e}")
+
+                try:
+                    if stdout_s.strip():
+                        data_s = json.loads(stdout_s)
+                        if 'entries' in data_s: 
+                            shorts = list(data_s['entries'])
+                            for s in shorts: s['_is_short'] = True # Tag as short
+                            entries.extend(shorts)
+                            log_msg(f"   + Tìm thấy {len(shorts)} shorts")
+                        else: 
+                            data_s['_is_short'] = True
+                            entries.append(data_s)
+                except Exception as e:
+                    print(f"DEBUG: Error parsing Shorts: {e}")
+                
+                # Fallback if both failed
+                if not entries:
+                     log_msg("⚠️ Không tìm thấy video/short nào, đang thử quét link gốc...")
+                     # entries is empty, so it will trigger the fallback block below
+            
             else:
-                cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
+                 entries = [] # Placeholder
 
-            # Check cookies
-            if var_cookies.get():
-                cmd.extend(["--cookies-from-browser", "chrome"])
-            
-            log_msg(f"🔍 Đang quét (nhanh): {link[:50]}...")
-            
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-            stdout, stderr = process.communicate()
-            
-            # Nếu cách 1 thất bại -> Thử CÁCH 2: FULL SCAN
-            if process.returncode != 0 or not stdout.strip():
-                log_msg(f"⚠️ Quét nhanh thất bại, thử quét kỹ...")
-                
-                cmd_full = [
-                    TOOL_PATH, 
-                    "--dump-single-json",
-                    "--no-check-certificate",
-                    "--ignore-errors",
-                    link
-                ]
-                
-                # UA FIX FOR FACEBOOK (Fallback)
-                if "facebook.com" in link or "fb.watch" in link:
-                    cmd_full.extend(["--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"])
-                else:
-                    cmd_full.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
+            # --- STANDARD SCAN / FALLBACK --- 
+            if not entries:
+                 log_msg("⏳ Đang quét chi tiết (fallback)...")
+                 # Standard execution (re-run for non-channel logic or failed channel logic)
+                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+                 stdout, stderr = process.communicate()
+                 print(f"DEBUG: Fallback stdout len={len(stdout)}, stderr={stderr[:100]}")
+                 
+                 # FB Fallback Check
+                 if (process.returncode != 0 or not stdout.strip()) and ("facebook.com" in link or "fb.watch" in link):
+                     log_msg(f"⚠️ Quét nhanh thất bại, thử quét kỹ (FB)...")
+                     cmd_full = [TOOL_PATH, "--dump-single-json", "--no-check-certificate", "--ignore-errors", link]
+                     cmd_full.extend(["--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"])
+                     if var_cookies.get(): cmd_full.extend(["--cookies-from-browser", "chrome"])
+                     
+                     process = subprocess.Popen(cmd_full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+                     stdout, stderr = process.communicate()
 
-                if var_cookies.get():
-                    cmd_full.extend(["--cookies-from-browser", "chrome"])
-                    
-                process = subprocess.Popen(cmd_full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-                stdout, stderr = process.communicate()
-                
-                if process.returncode != 0:
-                    gui_queue.put(lambda: messagebox.showerror("❌ Lỗi Quét", f"Không quét được video.\n\n⚠️ FACEBOOK: Bắt buộc phải đăng nhập Chrome và tick 'Dùng Cookies'.\n\nLỗi: {stderr[:300]}"))
-                    return
+                 if process.returncode != 0:
+                      errMsg = stderr if stderr else "Unknown error"
+                      gui_queue.put(lambda: messagebox.showerror("Không quét được", f"Không tìm thấy video.\nLink: {link}\nLỗi: {errMsg[:200]}"))
+                      return
 
-            try:
-                data = json.loads(stdout)
-            except json.JSONDecodeError:
-                 gui_queue.put(lambda: messagebox.showerror("❌ Lỗi Data", f"Kết quả không hợp lệ.\n{stdout[:300]}"))
-                 return
-            
-            entries = []
-            if 'entries' in data:
-                entries = list(data['entries'])
-            else:
-                entries = [data]
-            
+                 try:
+                    data = json.loads(stdout)
+                    if 'entries' in data: entries = list(data['entries'])
+                    else: entries = [data]
+                 except json.JSONDecodeError:
+                     gui_queue.put(lambda: messagebox.showerror("Lỗi dữ liệu", "Không thể đọc thông tin video. Vui lòng kiểm tra lại link."))
+                     return
+
+            # Filter empty
             entries = [e for e in entries if e]
             
             if not entries:
-                gui_queue.put(lambda: messagebox.showinfo("ℹ️ Thông báo", "Không tìm thấy video nào!"))
+                gui_queue.put(lambda: messagebox.showinfo("Thông báo", "Chưa tìm thấy video nào ở link này. Bạn hãy thử link khác nhé!"))
                 return
 
             def update_ui_tree():
                 for idx, entry in enumerate(entries, 1):
                     title = entry.get('title', 'No Title')
+                    # Check for Shorts tag
+                    is_short = entry.get('_is_short', False)
+                    # Also check title/url for 'shorts' if not tagged
                     entry_url = entry.get('webpage_url') or entry.get('url') or link
+                    if "/shorts/" in entry_url: is_short = True
+                    
+                    type_str = "[Shorts]" if is_short else "[Video]"
+                    display_title = f"{type_str} {title}"
                     
                     # Thêm checkbox vào cột đầu tiên
-                    item_id = tree.insert("", "end", values=("☐", idx, title, "⏸️ Chưa tải"))
+                    item_id = tree.insert("", "end", values=("☐", idx, display_title, "⏸️ Chưa tải"))
                     video_data_map[item_id] = {
                         "url": entry_url,
                         "title": title,
@@ -223,7 +286,7 @@ def scan_videos_thread():
             gui_queue.put(update_ui_tree)
 
         except Exception as e:
-            gui_queue.put(lambda: messagebox.showerror("❌ Lỗi", f"Lỗi khi quét: {e}"))
+            gui_queue.put(lambda: messagebox.showerror("Sự cố", f"Hệ thống gặp vấn đề khi xử lý: {e}"))
         finally:
             gui_queue.put(lambda: btn_scan.config(state=tk.NORMAL, text="🔍 Quét Danh Sách"))
 
@@ -243,10 +306,10 @@ def tai_video_thread():
     if not selected_items:
         all_items = tree.get_children()
         if not all_items:
-            messagebox.showwarning("⚠️ Trống", "Vui lòng Quét video trước!")
+            messagebox.showinfo("Chưa chọn video", "Bạn chưa chọn video nào. Vui lòng tick chọn ít nhất 1 video trong danh sách.")
             return
         
-        if messagebox.askyesno("Tải hết?", "Bạn chưa chọn video nào (chưa tick checkbox).\nBạn có muốn tải TOÀN BỘ không?"):
+        if messagebox.askyesno("Tải tất cả?", "Bạn chưa chọn video nào.\nBạn có muốn tải TOÀN BỘ danh sách video này không?"):
             selected_items = all_items
         else:
             return
@@ -256,11 +319,11 @@ def tai_video_thread():
         save_folder = os.getcwd()
 
     is_mp3 = var_mp3.get()
-    quality = cmb_quality.get()
+    quality = "Best" # Default to best since UI option was removed
     use_cookies = var_cookies.get()
     
     try:
-        delay_sec = float(entry_delay.get().strip())
+        delay_sec = 0 # Default delay
     except ValueError:
         delay_sec = 0
         
@@ -285,8 +348,8 @@ def tai_video_thread():
         else:
             base_cmd.extend(["-o", "%(uploader)s/%(upload_date)s - %(title)s.%(ext)s"])
             
-        if quality == "Tiết kiệm (480p)":
-            base_cmd.extend(["-f", "worstvideo[height>=480]+bestaudio/worst"])
+        # Quality logic simplified
+        # if quality == "Tiết kiệm (480p)": ... 
         
         if use_cookies:
             base_cmd.extend(["--cookies-from-browser", "chrome"])
@@ -358,7 +421,7 @@ def tai_video_thread():
         gui_queue.put(lambda: btn_stop.config(state=tk.DISABLED))
         
         if success_count == total:
-             gui_queue.put(lambda: messagebox.showinfo("✅ Hoàn tất", f"Đã tải xong {success_count}/{total} video!"))
+             gui_queue.put(lambda: messagebox.showinfo("Tuyệt vời", f"Đã tải xong {success_count}/{total} video! Kiểm tra thư mục lưu nhé."))
 
     threading.Thread(target=run_download_scheduler, daemon=True).start()
 
@@ -366,11 +429,11 @@ def direct_download_thread():
     """Tải trực tiếp link nhập vào (Bỏ qua bước Quét)"""
     link = entry_link.get().strip()
     if not link:
-        messagebox.showwarning("⚠️ Thiếu Link", "Vui lòng nhập link cần tải!")
+        messagebox.showinfo("Nhắc nhở", "Vui lòng dán link video cần tải.")
         entry_link.focus()
         return
 
-    if not messagebox.askyesno("⚡ Tải Trực Tiếp", "Chế độ này tải NGAY video từ Link\n(Không qua bảng danh sách)\n\n✅ Dùng khi:\n• Quét bị lỗi\n• Chỉ muốn tải 1 video\n• Link Facebook công khai\n\nTiếp tục?"):
+    if not messagebox.askyesno("Xác nhận", "Chế độ này sẽ tải ngay video từ link (không cần quét danh sách).\n\nBạn có muốn tiếp tục?"):
         return
 
     save_folder = entry_folder.get().strip()
@@ -479,26 +542,32 @@ window.configure(bg=COLORS['bg_main'])
 
 window.after(100, check_queue)
 
-# --- HEADER: TIÊU ĐỀ ---
-frame_header = tk.Frame(window, bg=COLORS['header_bg'], height=70)
-frame_header.pack(fill="x", padx=0, pady=0)
+# --- HEADER: CLEAN & SIMPLE ---
+frame_header = tk.Frame(window, bg=COLORS['card_bg'], height=60)
+frame_header.pack(fill="x")
 frame_header.pack_propagate(False)
 
-tk.Label(
-    frame_header, 
-    text="📥 Video Downloader Pro", 
-    font=FONTS['heading'], 
-    fg="white", 
-    bg=COLORS['header_bg']
-).pack(pady=8)
+# Separator Logic (Simulated by a bottom frame)
+tk.Frame(window, bg=COLORS['border'], height=1).pack(fill="x")
 
+# Title Left
 tk.Label(
     frame_header, 
-    text="✅ TikTok & YouTube | ⚠️ Facebook cần đăng nhập", 
+    text="Video Downloader Pro", 
+    font=FONTS['heading'], 
+    fg=COLORS['primary'], # Blue Accent
+    bg=COLORS['card_bg']
+).pack(side=tk.LEFT, padx=30, pady=15)
+
+# Status Right
+lbl_status_right = tk.Label(
+    frame_header, 
+    text="✅ Sẵn sàng sử dụng", 
     font=FONTS['small'], 
-    fg="#ecf0f1", 
-    bg=COLORS['header_bg']
-).pack()
+    fg=COLORS['success'], 
+    bg=COLORS['card_bg']
+)
+lbl_status_right.pack(side=tk.RIGHT, padx=30, pady=15)
 
 # --- SCROLLABLE CONTAINER CHO TOÀN BỘ APP ---
 # Tạo Canvas với scrollbar để có thể scroll toàn bộ nội dung
@@ -510,9 +579,10 @@ scrollable_frame = tk.Frame(main_canvas, bg=COLORS['bg_main'])
 def _configure_scroll_region(event):
     main_canvas.configure(scrollregion=main_canvas.bbox("all"))
 
-# Set width của scrollable_frame bằng width của canvas
+# Set width của scrollable_frame bằng width của canvas (trừ đi scrollbar)
 def _configure_canvas_width(event):
-    canvas_width = event.width
+    # Trừ đi bề rộng của scrollbar (khoảng 20px) để tránh hiện scrollbar ngang
+    canvas_width = event.width - 4
     main_canvas.itemconfig(canvas_window, width=canvas_width)
 
 scrollable_frame.bind("<Configure>", _configure_scroll_region)
@@ -526,286 +596,279 @@ main_scrollbar.pack(side="right", fill="y")
 
 # Enable mouse wheel scrolling
 def _on_mousewheel(event):
-    main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+    if platform.system() == "Windows":
+        main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+    elif platform.system() == "Darwin": # macOS
+        # macOS delta is usually smaller/inverted differently. 
+        # Often simply -1 * delta works well for 'natural' scrolling perception or just standard units
+        main_canvas.yview_scroll(int(-1 * event.delta), "units")
+    else:
+        # Linux / other
+        pass
 
-main_canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows/Mac
-main_canvas.bind_all("<Button-4>", lambda e: main_canvas.yview_scroll(-1, "units"))  # Linux scroll up
-main_canvas.bind_all("<Button-5>", lambda e: main_canvas.yview_scroll(1, "units"))  # Linux scroll down
+# Bind global scroll
+if platform.system() == "Linux":
+    main_canvas.bind_all("<Button-4>", lambda e: main_canvas.yview_scroll(-1, "units"))
+    main_canvas.bind_all("<Button-5>", lambda e: main_canvas.yview_scroll(1, "units"))
+else:
+    main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-# --- HƯỚNG DẪN SỬ DỤNG ---
-frame_guide = tk.Frame(
-    scrollable_frame,
-    bg=COLORS['card_bg'],
-    bd=1,
-    relief="solid",
-    highlightbackground=COLORS['border'],
-    highlightthickness=1
-)
-frame_guide.pack(fill="x", padx=20, pady=(15, 0))
+# --- HƯỚNG DẪN NHANH ---
+# Container Padding Wrapper
+frame_guide_container = tk.Frame(scrollable_frame, bg=COLORS['bg_main'])
+frame_guide_container.pack(fill="x", padx=30, pady=(24, 0))
 
-# Guide header
+frame_guide = create_card(frame_guide_container)
+frame_guide.pack(fill="x")
+
 tk.Label(
     frame_guide,
-    text="📖 HƯỚNG DẪN SỬ DỤNG",
-    font=FONTS['subheading'],
+    text="💡 Hướng dẫn nhanh",
+    font=FONTS['step_title'],
     bg=COLORS['card_bg'],
     fg=COLORS['text_primary']
-).pack(anchor="w", padx=20, pady=(15, 10))
+).pack(anchor="w", padx=24, pady=(20, 5))
 
-guide_text = """
-✅ TikTok & YouTube: Hoạt động tốt, không cần đăng nhập
-⚠️ Facebook: CẦN đăng nhập Chrome và tick "Dùng Cookies"
-
-📝 CÁCH SỬ DỤNG:
-1️⃣ Nhập link video/kênh vào ô "Link"
-2️⃣ Chọn thư mục lưu file (hoặc để mặc định)
-3️⃣ Tùy chỉnh: MP3, Chất lượng, Cookies (nếu cần)
-4️⃣ Nhấn "🔍 Quét Danh Sách" để xem tất cả video
-5️⃣ Tick chọn video muốn tải (hoặc "✅ Chọn Tất Cả")
-6️⃣ Nhấn "🚀 Tải Đã Chọn" để bắt đầu tải
-
-⚡ TẢI NHANH: Nhấn "⚡ Tải Thẳng" để tải 1 video ngay (không cần quét)
-"""
+guide_text = """• Bước 1: Dán link video vào ô bên dưới.
+• Bước 2: Bấm "Quét & tải video" để xem danh sách.
+• Tải nhanh: Bấm nút "Tải nhanh" để bỏ qua bước quét."""
 
 tk.Label(
     frame_guide,
-    text=guide_text.strip(),
+    text=guide_text,
     font=FONTS['body'],
     bg=COLORS['card_bg'],
     fg=COLORS['text_secondary'],
     justify="left",
     anchor="w"
-).pack(fill="x", padx=20, pady=(0, 15))
+).pack(fill="x", padx=24, pady=(0, 20))
 
-# --- PHẦN 1: NHẬP LINK ---
-frame_input_section = tk.Frame(
-    scrollable_frame,
-    bg=COLORS['card_bg'],
-    bd=1,
-    relief="solid",
-    highlightbackground=COLORS['border'],
-    highlightthickness=1
-)
-frame_input_section.pack(fill="x", padx=20, pady=10)
+# --- BƯỚC 1: NHẬP LINK ---
+frame_input_container = tk.Frame(scrollable_frame, bg=COLORS['bg_main'])
+frame_input_container.pack(fill="x", padx=30, pady=20)
 
+frame_input_section = create_card(frame_input_container)
+frame_input_section.pack(fill="x")
+
+# Step Title
 tk.Label(
     frame_input_section,
-    text="📌 BƯỚC 1: Nhập Link Video/Kênh",
-    font=FONTS['subheading'],
+    text="Bước 1: Dán link video hoặc kênh",
+    font=FONTS['step_title'],
     bg=COLORS['card_bg'],
-    fg=COLORS['text_primary']
-).pack(anchor="w", padx=20, pady=(15, 10))
+    fg=COLORS['step_title'] # BLUE
+).pack(anchor="w", padx=24, pady=(24, 12))
 
-frame_link = tk.Frame(frame_input_section, bg=COLORS['card_bg'])
-frame_link.pack(fill="x", pady=5, padx=20)
-tk.Label(frame_link, text="Link:", font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary']).pack(side=tk.LEFT, padx=(0, 10))
-entry_link = tk.Entry(frame_link, font=FONTS['body'], width=70, relief="solid", bd=1)
-entry_link.pack(side=tk.LEFT, fill="x", expand=True)
+# Link Input
+frame_link_container = tk.Frame(frame_input_section, bg=COLORS['card_bg'])
+frame_link_container.pack(fill="x", padx=24, pady=(0, 12))
 
-frame_folder = tk.Frame(frame_input_section, bg=COLORS['card_bg'])
-frame_folder.pack(fill="x", pady=5, padx=20)
-tk.Label(frame_folder, text="Lưu tại:", font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary']).pack(side=tk.LEFT, padx=(0, 10))
-entry_folder = tk.Entry(frame_folder, font=FONTS['body'], width=60, relief="solid", bd=1)
+entry_link = tk.Entry(frame_link_container, font=FONTS['body'], fg=COLORS['text_secondary'])
+style_input(entry_link) # New Styling
+entry_link.pack(fill="x", ipady=10)
+
+# Placeholder logic
+def on_entry_click(event):
+    if entry_link.get() == "Dán link TikTok / YouTube / Facebook vào đây…":
+        entry_link.delete(0, "end")
+        entry_link.config(fg=COLORS['text_primary'])
+
+def on_focusout(event):
+    if entry_link.get() == "":
+        entry_link.insert(0, "Dán link TikTok / YouTube / Facebook vào đây…")
+        entry_link.config(fg=COLORS['text_secondary'])
+
+entry_link.insert(0, "Dán link TikTok / YouTube / Facebook vào đây…")
+entry_link.bind('<FocusIn>', on_entry_click)
+entry_link.bind('<FocusOut>', on_focusout)
+
+# Folder Input
+frame_folder_container = tk.Frame(frame_input_section, bg=COLORS['card_bg'])
+frame_folder_container.pack(fill="x", padx=24, pady=(0, 24))
+
+tk.Label(frame_folder_container, text="Thư mục:", font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary']).pack(side=tk.LEFT)
+
+entry_folder = tk.Entry(frame_folder_container, font=FONTS['body'], width=30, fg=COLORS['text_primary'])
+style_input(entry_folder)
 entry_folder.insert(0, os.getcwd())
-entry_folder.pack(side=tk.LEFT, fill="x", expand=True)
+entry_folder.pack(side=tk.LEFT, fill="x", expand=True, padx=12, ipady=5)
 
 btn_browse = tk.Button(
-    frame_folder,
-    text="📂 Chọn",
+    frame_folder_container,
+    text="Chọn...",
     font=FONTS['small'],
-    bg=COLORS['border'],
+    bg=COLORS['secondary'],
     fg=COLORS['text_primary'],
     relief="flat",
-    padx=10,
-    command=chon_thu_muc
+    padx=16, pady=5,
+    command=chon_thu_muc,
+    cursor="hand2"
 )
-btn_browse.pack(side=tk.LEFT, padx=10)
+style_input(btn_browse) # Gives it similar rounding/border if needed, or just hover
+add_hover(btn_browse, COLORS['secondary'], COLORS['secondary_hover'])
+btn_browse.pack(side=tk.LEFT)
 
-# --- PHẦN 2: TÙY CHỌN ---
-frame_options_section = tk.Frame(
-    scrollable_frame,
-    bg=COLORS['card_bg'],
-    bd=1,
-    relief="solid",
-    highlightbackground=COLORS['border'],
-    highlightthickness=1
-)
-frame_options_section.pack(fill="x", padx=20, pady=10)
+# --- BƯỚC 2: TUỲ CHỌN ---
+frame_options_container = tk.Frame(scrollable_frame, bg=COLORS['bg_main'])
+frame_options_container.pack(fill="x", padx=30, pady=0)
+
+frame_options_section = create_card(frame_options_container)
+frame_options_section.pack(fill="x")
 
 tk.Label(
     frame_options_section,
-    text="⚙️ BƯỚC 2: Cài Đặt Tùy Chọn",
-    font=FONTS['subheading'],
+    text="Bước 2: Tuỳ chọn tải",
+    font=FONTS['step_title'],
     bg=COLORS['card_bg'],
-    fg=COLORS['text_primary']
-).pack(anchor="w", padx=20, pady=(15, 10))
+    fg=COLORS['step_title'] # BLUE
+).pack(anchor="w", padx=24, pady=(24, 12))
 
 frame_opts = tk.Frame(frame_options_section, bg=COLORS['card_bg'])
-frame_opts.pack(fill="x", padx=20, pady=(0, 20))
+frame_opts.pack(fill="x", padx=24, pady=(0, 24))
 
 var_mp3 = tk.BooleanVar()
 chk_mp3 = tk.Checkbutton(
-    frame_opts, text="🎵 Chỉ tải MP3", variable=var_mp3,
+    frame_opts, text="Chỉ tải âm thanh (MP3)", variable=var_mp3,
     font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary'],
-    selectcolor=COLORS['card_bg'], activebackground=COLORS['card_bg']
+    selectcolor=COLORS['card_bg'], activebackground=COLORS['card_bg'],
+    cursor="hand2"
 )
-chk_mp3.pack(side=tk.LEFT, padx=(0, 15))
-
-var_cookies = tk.BooleanVar()
-chk_cookies = tk.Checkbutton(
-    frame_opts, text="🍪 Dùng Cookies (Chrome)", variable=var_cookies,
-    font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary'],
-    selectcolor=COLORS['card_bg'], activebackground=COLORS['card_bg']
-)
-chk_cookies.pack(side=tk.LEFT, padx=15)
+chk_mp3.pack(side=tk.LEFT, padx=(0, 24))
 
 var_thumbnail = tk.BooleanVar()
 chk_thumbnail = tk.Checkbutton(
-    frame_opts, text="🖼️ Tải Thumbnail", variable=var_thumbnail,
+    frame_opts, text="Tải ảnh thumbnail", variable=var_thumbnail,
     font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary'],
-    selectcolor=COLORS['card_bg'], activebackground=COLORS['card_bg']
+    selectcolor=COLORS['card_bg'], activebackground=COLORS['card_bg'],
+    cursor="hand2"
 )
-chk_thumbnail.pack(side=tk.LEFT, padx=15)
+chk_thumbnail.pack(side=tk.LEFT, padx=24)
 
-frame_quality = tk.Frame(frame_options_section, bg=COLORS['card_bg'])
-frame_quality.pack(fill="x", padx=20, pady=(0, 20))
-
-tk.Label(frame_quality, text="Chất lượng:", font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary']).pack(side=tk.LEFT)
-quality_options = ["HD/Best", "1080p", "720p", "480p", "Worst"]
-var_quality = tk.StringVar(value=quality_options[0])
-opt_quality = tk.OptionMenu(frame_quality, var_quality, *quality_options)
-opt_quality.config(font=FONTS['body'], bg=COLORS['bg_main'], borderwidth=0, highlightthickness=1)
-opt_quality.pack(side=tk.LEFT, padx=(10, 20))
-
-tk.Label(frame_quality, text="Delay (giây):", font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary']).pack(side=tk.LEFT)
-entry_delay = tk.Entry(frame_quality, font=FONTS['body'], width=5, justify="center", relief="solid", bd=1)
-entry_delay.insert(0, "0")
-entry_delay.pack(side=tk.LEFT, padx=10)
-tk.Label(frame_quality, text="(tùy chỉnh)", font=FONTS['small'], bg=COLORS['card_bg'], fg=COLORS['text_secondary']).pack(side=tk.LEFT)
-
-# --- PHẦN 3: HÀNH ĐỘNG ---
-# --- PHẦN 3: HÀNH ĐỘNG ---
-frame_action_section = tk.Frame(
-    scrollable_frame,
-    bg=COLORS['card_bg'],
-    bd=1,
-    relief="solid",
-    highlightbackground=COLORS['border'],
-    highlightthickness=1
+var_cookies = tk.BooleanVar()
+chk_cookies = tk.Checkbutton(
+    frame_opts, text="Dùng Cookies", variable=var_cookies,
+    font=FONTS['body'], bg=COLORS['card_bg'], fg=COLORS['text_primary'],
+    selectcolor=COLORS['card_bg'], activebackground=COLORS['card_bg'],
+    cursor="hand2"
 )
-frame_action_section.pack(fill="x", padx=20, pady=10)
+chk_cookies.pack(side=tk.LEFT, padx=24)
+
+
+# --- BƯỚC 3: HÀNH ĐỘNG ---
+# --- BƯỚC 3: HÀNH ĐỘNG ---
+frame_action_container = tk.Frame(scrollable_frame, bg=COLORS['bg_main'])
+frame_action_container.pack(fill="x", padx=30, pady=20)
+
+frame_action_section = create_card(frame_action_container)
+frame_action_section.pack(fill="x")
 
 tk.Label(
     frame_action_section,
-    text="🎬 BƯỚC 3: Chọn Hành Động",
-    font=FONTS['subheading'],
+    text="Bước 3: Hành động",
+    font=FONTS['step_title'],
     bg=COLORS['card_bg'],
-    fg=COLORS['text_primary']
-).pack(anchor="w", padx=20, pady=(15, 10))
+    fg=COLORS['step_title'] # BLUE
+).pack(anchor="w", padx=24, pady=(24, 12))
 
 frame_buttons = tk.Frame(frame_action_section, bg=COLORS['card_bg'])
-frame_buttons.pack(pady=(0, 20))
+frame_buttons.pack(pady=(0, 24), padx=24, fill="x")
 
-# Row 1: Buttons
+# Buttons Container
 frame_btn_row = tk.Frame(frame_buttons, bg=COLORS['card_bg'])
-frame_btn_row.pack()
+frame_btn_row.pack(anchor="w")
 
+# Primary Button (Blue)
 btn_scan = tk.Button(
     frame_btn_row,
-    text="🔍 Quét Danh Sách",
+    text="🚀 Quét & tải video",
     font=FONTS['button'],
-    bg=COLORS['accent_primary'],
-    fg="white",
-    activebackground="#5a67d8",
-    activeforeground="white",
+    bg=COLORS['primary'],
+    fg=COLORS['white'],
+    activebackground=COLORS['primary_hover'],
+    activeforeground=COLORS['white'],
     relief="flat",
     borderwidth=0,
     cursor="hand2",
     highlightthickness=0,
-    padx=20, pady=10,
-    command=scan_videos_thread
+    padx=28, pady=12
 )
-btn_scan.pack(side=tk.LEFT, padx=15)
+btn_scan.config(command=scan_videos_thread)
+add_hover(btn_scan, COLORS['primary'], COLORS['primary_hover'])
+btn_scan.pack(side=tk.LEFT, padx=(0, 16))
 
+# Secondary Button
 btn_direct_dl = tk.Button(
     frame_btn_row,
-    text="⚡ Tải Thẳng",
+    text="⚡ Tải nhanh 1 video",
     font=FONTS['button'],
-    bg=COLORS['header_accent'],
-    fg="white",
-    activebackground="#2980b9",
-    activeforeground="white",
+    bg=COLORS['secondary'],
+    fg=COLORS['text_primary'],
+    activebackground=COLORS['secondary_hover'],
+    activeforeground=COLORS['text_primary'],
     relief="flat",
     borderwidth=0,
     cursor="hand2",
     highlightthickness=0,
-    padx=20, pady=10,
-    command=direct_download_thread
+    padx=20, pady=12
 )
-btn_direct_dl.pack(side=tk.LEFT, padx=15)
+btn_direct_dl.config(command=direct_download_thread)
+add_hover(btn_direct_dl, COLORS['secondary'], COLORS['secondary_hover'])
+btn_direct_dl.pack(side=tk.LEFT)
 
-# Row 2: Labels
+# Helper Labels
 frame_label_row = tk.Frame(frame_buttons, bg=COLORS['card_bg'])
 frame_label_row.pack(pady=5)
 
-tk.Label(
-    frame_label_row,
-    text="(Quét link → Chọn video → Tải)",
-    font=FONTS['small'],
-    fg=COLORS['accent_success'],
-    bg=COLORS['card_bg']
-).pack(side=tk.LEFT, padx=80)
+# --- DANH SÁCH VIDEO ---
+# --- DANH SÁCH VIDEO ---
+frame_list_container = tk.Frame(scrollable_frame, bg=COLORS['bg_main'])
+frame_list_container.pack(fill="both", expand=True, padx=30, pady=20)
 
-tk.Label(
-    frame_label_row,
-    text="(Tải ngay 1 video, không quét)",
-    font=FONTS['small'],
-    fg=COLORS['header_accent'],
-    bg=COLORS['card_bg']
-).pack(side=tk.LEFT, padx=80)
-
-# --- PHẦN 4: DANH SÁCH VIDEO ---
-# --- PHẦN 4: DANH SÁCH VIDEO ---
-frame_list_section = tk.Frame(
-    scrollable_frame,
-    bg=COLORS['card_bg'],
-    bd=1,
-    relief="solid",
-    highlightbackground=COLORS['border'],
-    highlightthickness=1
-)
-frame_list_section.pack(fill="both", expand=True, padx=20, pady=10)
+frame_list_section = create_card(frame_list_container)
+frame_list_section.pack(fill="both", expand=True)
 
 tk.Label(
     frame_list_section,
-    text="📋 DANH SÁCH VIDEO (Sau khi Quét)",
-    font=FONTS['subheading'],
+    text="Danh sách video",
+    font=FONTS['step_title'],
     bg=COLORS['card_bg'],
-    fg=COLORS['text_primary']
-).pack(anchor="w", padx=20, pady=(15, 10))
+    fg=COLORS['step_title']
+).pack(anchor="w", padx=24, pady=(20, 5))
+
+# Empty State Label
+lbl_list_empty = tk.Label(
+    frame_list_section,
+    text="Chưa có video nào. Dán link và bấm Quét & tải video để bắt đầu.",
+    font=FONTS['body'],
+    fg=COLORS['text_secondary'],
+    bg=COLORS['card_bg']
+)
+lbl_list_empty.pack(pady=40)
 
 frame_list = tk.Frame(frame_list_section, bg=COLORS['card_bg'])
-frame_list.pack(fill="both", expand=True, padx=20)
+# Initially hide functionality until data (logic handled in scan fn, but pack here)
+frame_list.pack(fill="both", expand=True, padx=24)
 
 # Treeview Styling
 style = ttk.Style()
-style.theme_use("clam")  # Use clam styling for better customization
+style.theme_use("clam")
 style.configure("Treeview",
     background="white",
     foreground=COLORS['text_primary'],
     fieldbackground="white",
     font=FONTS['body'],
-    rowheight=30
+    rowheight=40, # Taller rows
+    borderwidth=0
 )
 style.configure("Treeview.Heading",
     background=COLORS['bg_main'],
     foreground=COLORS['text_primary'],
-    font=FONTS['subheading'],
+    font=FONTS['body_bold'],
     relief="flat"
 )
-style.map("Treeview", background=[('selected', COLORS['accent_primary'])])
+style.map("Treeview", background=[('selected', COLORS['primary'])])
 
-# Scrollbar dọc
+# Scrollbar dọc - Modern looking if possible, otherwise standard
 scrollbar_y = tk.Scrollbar(frame_list, orient="vertical")
 scrollbar_y.pack(side=tk.RIGHT, fill="y")
 
@@ -815,27 +878,27 @@ scrollbar_x.pack(side=tk.BOTTOM, fill="x")
 
 columns = ("check", "idx", "title", "status")
 tree = ttk.Treeview(
-    frame_list, 
-    columns=columns, 
-    show="headings", 
-    height=15,  # Hiển thị tối đa 15 dòng, sau đó phải scroll
-    yscrollcommand=scrollbar_y.set, 
+    frame_list,
+    columns=columns,
+    show="headings",
+    height=12,
+    yscrollcommand=scrollbar_y.set,
     xscrollcommand=scrollbar_x.set
 )
 
-tree.heading("check", text="✓")
-tree.column("check", width=40, anchor="center")
+tree.heading("check", text="Chọn")
+tree.column("check", width=60, anchor="center")
 
-tree.heading("idx", text="#")
+tree.heading("idx", text="STT")
 tree.column("idx", width=50, anchor="center")
 
-tree.heading("title", text="Tiêu Đề Video")
-tree.column("title", width=550)
+tree.heading("title", text="Tiêu đề Video")
+tree.column("title", width=500)
 
-tree.heading("status", text="Trạng Thái / Tiến Độ")
+tree.heading("status", text="Trạng thái")
 tree.column("status", width=200, anchor="center")
 
-tree.pack(fill="both", expand=True, pady=(0, 0))
+tree.pack(fill="both", expand=True) # Full width inside frame_list
 
 scrollbar_y.config(command=tree.yview)
 scrollbar_x.config(command=tree.xview)
@@ -862,102 +925,98 @@ def deselect_all():
     for item in tree.get_children():
         tree.set(item, "check", "☐")
 
+# Selection Action Bar
 frame_select_btns = tk.Frame(frame_list_section, bg=COLORS['card_bg'])
-frame_select_btns.pack(fill="x", pady=(10, 20), padx=20)
+frame_select_btns.pack(fill="x", pady=(10, 24), padx=24)
 
-tk.Button(
+btn_sel_all = tk.Button(
     frame_select_btns,
-    text="✅ Chọn Tất Cả",
+    text="Chọn tất cả",
     command=select_all,
     font=FONTS['small'],
-    bg=COLORS['border'],
+    bg=COLORS['secondary'],
     fg=COLORS['text_primary'],
     relief="flat",
-    padx=15, pady=5,
+    padx=16, pady=6,
     cursor="hand2"
-).pack(side=tk.LEFT, padx=10)
+)
+add_hover(btn_sel_all, COLORS['secondary'], COLORS['secondary_hover'])
+btn_sel_all.pack(side=tk.LEFT, padx=(0, 10))
 
-tk.Button(
+btn_desel = tk.Button(
     frame_select_btns,
-    text="❌ Bỏ Chọn",
+    text="Bỏ chọn",
     command=deselect_all,
     font=FONTS['small'],
-    bg=COLORS['border'],
+    bg=COLORS['secondary'],
     fg=COLORS['text_primary'],
     relief="flat",
-    padx=15, pady=5,
+    padx=16, pady=6,
     cursor="hand2"
-).pack(side=tk.LEFT, padx=10)
-
-# --- PHẦN 5: ĐIỀU KHIỂN TẢI ---
-# --- PHẦN 5: ĐIỀU KHIỂN TẢI ---
-frame_download_section = tk.Frame(
-    scrollable_frame,
-    bg=COLORS['card_bg'],
-    bd=1,
-    relief="solid",
-    highlightbackground=COLORS['border'],
-    highlightthickness=1
 )
-frame_download_section.pack(fill="x", padx=20, pady=10)
+add_hover(btn_desel, COLORS['secondary'], COLORS['secondary_hover'])
+btn_desel.pack(side=tk.LEFT, padx=10)
 
-tk.Label(
-    frame_download_section,
-    text="🎯 ĐIỀU KHIỂN TẢI",
-    font=FONTS['subheading'],
-    bg=COLORS['card_bg'],
-    fg=COLORS['text_primary']
-).pack(anchor="w", padx=20, pady=(15, 10))
+# --- PHẦN 5: ĐIỀU KHIỂN TẢI ---
+# --- BƯỚC 4: TIẾN HÀNH TẢI ---
+frame_download_container = tk.Frame(scrollable_frame, bg=COLORS['bg_main'])
+frame_download_container.pack(fill="x", padx=30, pady=(0, 40))
+
+frame_download_section = create_card(frame_download_container)
+frame_download_section.pack(fill="x")
 
 frame_dl_btns = tk.Frame(frame_download_section, bg=COLORS['card_bg'])
-frame_dl_btns.pack(pady=(0, 20))
+frame_dl_btns.pack(pady=24, padx=24, fill="x")
 
+# Main Download Trigger
 btn_download = tk.Button(
     frame_dl_btns,
-    text="🚀 Tải Đã Chọn",
+    text="Bắt đầu tải video đã chọn",
     font=FONTS['button'],
-    bg=COLORS['accent_warning'],
-    fg="white",
-    activebackground="#d35400",
-    activeforeground="white",
+    bg=COLORS['success'],
+    fg=COLORS['white'],
+    activebackground="#059669",
+    activeforeground=COLORS['white'],
     relief="flat",
     borderwidth=0,
     cursor="hand2",
     highlightthickness=0,
-    padx=20, pady=10,
+    padx=25, pady=12,
     command=tai_video_thread
 )
-btn_download.pack(side=tk.LEFT, padx=15)
+add_hover(btn_download, COLORS['success'], "#059669")
+btn_download.pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 10))
 
 btn_stop = tk.Button(
     frame_dl_btns,
-    text="⏹️ Dừng Lại",
+    text="Dừng lại",
     font=FONTS['button'],
-    bg=COLORS['accent_danger'],
-    fg="white",
-    activebackground="#c0392b",
-    activeforeground="white",
+    bg=COLORS['error'],
+    fg=COLORS['white'],
+    activebackground="#DC2626",
+    activeforeground=COLORS['white'],
     relief="flat",
     borderwidth=0,
     cursor="hand2",
     highlightthickness=0,
-    padx=20, pady=10,
+    padx=25, pady=12,
     command=stop_download,
     state=tk.DISABLED
 )
-btn_stop.pack(side=tk.LEFT, padx=15)
+add_hover(btn_stop, COLORS['error'], "#DC2626")
+btn_stop.pack(side=tk.LEFT, padx=(10, 0))
 
 # --- STATUS BAR ---
 # --- STATUS BAR ---
 status_label = tk.Label(
     window,
-    text="✅ Sẵn sàng - Hỗ trợ TikTok/YouTube/Facebook",
+    text="Sẵn sàng sử dụng",
     font=FONTS['small'],
-    bg=COLORS['header_bg'],
-    fg="white",
+    bg="#F1F5F9",
+    fg=COLORS['text_secondary'],
     bd=0,
-    padx=10,
-    pady=5,
+    padx=15,
+    pady=8,
     anchor="w"
 )
 status_label.pack(side=tk.BOTTOM, fill="x")
