@@ -128,7 +128,14 @@ class VideoDownloaderApp(ctk.CTk):
                                        fg_color="transparent", text_color=COLORS["text_primary"])
         self.entry_link.pack(fill="x", padx=10, pady=2)
         
-        ctk.CTkLabel(controls_inner, text="Hỗ trợ: YouTube, TikTok, Facebook", 
+        # Batch Import Link
+        btn_batch = ctk.CTkButton(url_group, text="📋 Nhập nhiều Link", width=100, height=24,
+                                  fg_color="transparent", text_color=COLORS["blue_primary"],
+                                  font=("Arial", 11, "bold"), hover=False,
+                                  command=self.open_batch_import)
+        btn_batch.pack(fill="x", pady=(0, 5))
+        
+        ctk.CTkLabel(controls_inner, text="Hỗ trợ: YouTube, TikTok, FB & 1000+ web khác", 
                      font=("Arial", 11), text_color=COLORS["text_secondary"]).pack(anchor="w", pady=(0, 20))
 
 
@@ -193,7 +200,15 @@ class VideoDownloaderApp(ctk.CTk):
         
         self.var_cookies = ctk.BooleanVar(value=False)
         self.chk_cookies = create_option_card(controls_inner, "Sử dụng Cookies", "Dùng cho video riêng tư/hạn chế", self.var_cookies)
-
+        
+        # Cookie File Selection (Optional)
+        self.cookie_file_path = None
+        self.btn_cookie_file = ctk.CTkButton(controls_inner, text="Chọn file cookies.txt (Khuyên dùng)", 
+                                             height=30, fg_color=COLORS["bg_sidebar"], text_color=COLORS["blue_primary"],
+                                             border_width=1, border_color=COLORS["blue_primary"],
+                                             command=self.select_cookie_file)
+        self.btn_cookie_file.pack(fill="x", pady=(0, 10))
+        
         # 3. Footer Actions (Scan & Fast DL)
         # We pack this into self.sidebar BOTTOM so it stays fixed
         actions_panel = ctk.CTkFrame(self.sidebar, fg_color=COLORS["blue_light_bg"], height=140, corner_radius=0)
@@ -266,8 +281,17 @@ class VideoDownloaderApp(ctk.CTk):
         header_row.grid(row=1, column=0, sticky="ew")
         header_row.pack_propagate(False)
         
-        h_chk_frame = ctk.CTkFrame(header_row, width=60, fg_color="transparent")
-        h_chk_frame.pack(side="left", fill="y")
+        # Grid Configuration for alignment (0:Chk, 1:Name, 2:Dur, 3:Qual, 4:Status)
+        header_row.grid_columnconfigure(0, weight=0, minsize=50) # Checkbox
+        header_row.grid_columnconfigure(1, weight=1)             # Name (Flexible)
+        header_row.grid_columnconfigure(2, weight=0, minsize=100) # Duration
+        header_row.grid_columnconfigure(3, weight=0, minsize=80)  # Quality
+        header_row.grid_columnconfigure(4, weight=0, minsize=120) # Status
+
+        # Header Columns
+        # Col 0: Checkbox
+        h_chk_frame = ctk.CTkFrame(header_row, fg_color="transparent", width=50, height=50)
+        h_chk_frame.grid(row=0, column=0, sticky="nsew")
         
         self.var_select_all = ctk.BooleanVar(value=True)
         self.chk_select_all = ctk.CTkCheckBox(h_chk_frame, text="", variable=self.var_select_all, width=20, height=20, border_width=2,
@@ -275,16 +299,15 @@ class VideoDownloaderApp(ctk.CTk):
                                               command=self.toggle_select_all_header)
         self.chk_select_all.place(relx=0.5, rely=0.5, anchor="center")
 
-        def create_header_label(parent, text, width=None):
-            f = ctk.CTkFrame(parent, fg_color="transparent", width=width if width else 0)
-            f.pack(side="left", fill="y" if width else "both", expand=not width)
-            f.pack_propagate(False) if width else None
-            ctk.CTkLabel(f, text=text.upper(), font=("Arial", 11, "bold"), text_color=COLORS["text_secondary"]).pack(side="left", padx=10, fill="y")
-            
-        create_header_label(header_row, "Tên Video")
-        create_header_label(header_row, "Thời lượng", width=120)
-        create_header_label(header_row, "Chất lượng", width=120)
-        create_header_label(header_row, "Trạng thái", width=150)
+        def create_header_label(col_idx, text, anchor="center"):
+            lbl = ctk.CTkLabel(header_row, text=text.upper(), font=("Arial", 11, "bold"), text_color=COLORS["text_secondary"])
+            lbl.grid(row=0, column=col_idx, sticky="nsew", padx=5)
+            # if anchor != "center": lbl.configure(anchor=anchor) # CTkLabel grid treats sticky as fill, explicit anchor sometimes needed
+
+        create_header_label(1, "Tên Video", anchor="w")
+        create_header_label(2, "Thời lượng")
+        create_header_label(3, "Chất lượng")
+        create_header_label(4, "Trạng thái")
         
         ctk.CTkFrame(self.main_area, height=1, fg_color=COLORS["border"]).grid(row=1, column=0, sticky="sew")
 
@@ -361,6 +384,54 @@ class VideoDownloaderApp(ctk.CTk):
         self.toggle_all_checkboxes(False)
         self.var_select_all.set(False) # Uncheck header
 
+    def open_batch_import(self):
+        # Create a Toplevel window
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Nhập danh sách Link")
+        dialog.geometry("500x400")
+        dialog.transient(self) # Make it modal-like
+        
+        ctk.CTkLabel(dialog, text="Dán danh sách link (mỗi dòng 1 link):", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        txt_input = ctk.CTkTextbox(dialog, width=450, height=250)
+        txt_input.pack(pady=10)
+        txt_input.focus()
+        
+        def on_confirm():
+            content = txt_input.get("1.0", "end").strip()
+            if not content: return
+            lines = [l.strip() for l in content.split('\n') if l.strip()]
+            dialog.destroy()
+            self.process_batch_links(lines)
+            
+        btn_confirm = ctk.CTkButton(dialog, text="Xác nhận & Thêm vào list", command=on_confirm, fg_color=COLORS["blue_primary"])
+        btn_confirm.pack(pady=10)
+
+    def process_batch_links(self, links):
+        if not links: return
+        
+        # Clear existing? Maybe not, allow appending
+        # self.video_data_map.clear()
+        
+        entries = []
+        for i, link in enumerate(links):
+            # Create dummy entry
+            entries.append({
+                'id': f'batch_{int(time.time())}_{i}',
+                'title': f'Video Link {i+1}', # Will be updated if possible or just use link
+                'url': link,
+                'webpage_url': link,
+                'duration': 0,
+                'thumbnail': None
+            })
+            
+        self.process_entries(entries, "Batch Import")
+        
+        # Optionally trigger a quick metadata fetch in background?
+        # For now, just listing them is enough to let user download. 
+        # The download process will verify them.
+        self.log_msg(f"Added {len(entries)} links from batch import.")
+
     # --- LOGIC IMPLEMENTATION ---
 
 
@@ -371,6 +442,14 @@ class VideoDownloaderApp(ctk.CTk):
             self.entry_folder.delete(0, 'end')
             self.entry_folder.insert(0, folder)
             self.entry_folder.xview_moveto(1) # Scroll to end
+
+    def select_cookie_file(self):
+        filename = filedialog.askopenfilename(title="Chọn file cookies.txt (Netscape format)", filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
+        if filename:
+            self.cookie_file_path = filename
+            self.var_cookies.set(True) # Auto check
+            self.btn_cookie_file.configure(text=f"File: {os.path.basename(filename)}", fg_color=COLORS["blue_light_bg"])
+            messagebox.showinfo("Cookies", "Đã chọn file cookies.\nLưu ý: File phải đúng định dạng Netscape/Mozilla cookies.")
 
     def log_msg(self, msg):
         print(msg) # For now print to console, could add a status label later
@@ -396,11 +475,13 @@ class VideoDownloaderApp(ctk.CTk):
 
     def run_scan_logic(self, link):
         try:
-             # Auto fix Facebook link
-            if "facebook.com" in link or "fb.watch" in link:
-                if "videos" not in link and "reels" not in link and "watch" not in link:
-                    if link.endswith("/"): link = link[:-1]
-                    link += "/videos"
+            # Auto fix Facebook link (DISABLED to prevent issues with Playlists/Profiles)
+            # if "facebook.com" in link or "fb.watch" in link:
+            #     # Don't modify if it looks like a specific video, reel, or playlist/album
+            #     keywords = ["videos", "reels", "watch", "playlist", "set=", "media"]
+            #     if not any(k in link for k in keywords):
+            #         if link.endswith("/"): link = link[:-1]
+            #         link += "/videos"
             
             # 1. Check Channel vs Video
             is_youtube_channel = ("youtube.com" in link) and ("youtu.be" not in link)
@@ -420,36 +501,106 @@ class VideoDownloaderApp(ctk.CTk):
             self.gui_queue.put(lambda: self.btn_scan.configure(state="normal", text="Quét & Lấy Danh Sách"))
 
     def scan_standard(self, link):
+        # List of candidate URLs to try
+        candidates = [link]
+        
+        if "facebook.com" in link or "fb.watch" in link:
+            # Generate variants
+            
+            # 1. Handle /videos vs /reels
+            if "/videos" in link:
+                # Try removing videos, or swapping to reels
+                base = link.replace("/videos", "")
+                candidates.append(base)
+                if base.endswith("/"): candidates.append(base + "reels")
+                else: candidates.append(base + "/reels")
+                
+            elif "/reels" in link:
+                # Try removing reels, or swapping to videos
+                base = link.replace("/reels", "")
+                candidates.append(base)
+                if base.endswith("/"): candidates.append(base + "videos")
+                else: candidates.append(base + "/videos")
+                
+            else:
+                # Neither present, try adding both
+                if link.endswith("/"): 
+                    candidates.append(link + "videos")
+                    candidates.append(link + "reels")
+                else: 
+                    candidates.append(link + "/videos")
+                    candidates.append(link + "/reels")
+            
+            # 2. Mobile variants for all above
+            mobile_candidates = []
+            for c in candidates:
+                if "www.facebook.com" in c:
+                    mobile_candidates.append(c.replace("www.facebook.com", "m.facebook.com"))
+                elif "facebook.com" in c and "m.facebook.com" not in c:
+                    mobile_candidates.append(c.replace("facebook.com", "m.facebook.com"))
+            
+            candidates.extend(mobile_candidates)
+            
+            # Deduplicate preserving order
+            seen = set()
+            unique_candidates = []
+            for c in candidates:
+                if c not in seen:
+                    unique_candidates.append(c)
+                    seen.add(c)
+            candidates = unique_candidates
+
+        print(f"DEBUG: Scanning candidates: {candidates}")
+        
+        success = False
+        for c_link in candidates:
+            print(f"Trying: {c_link}")
+            if self._try_scan(c_link):
+                success = True
+                break
+
+        if not success and not self.stop_flag: # Only show error if all retries failed
+             self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", f"Không tìm thấy video từ link này.\nĐã thử {len(candidates)} kiểu link khác nhau nhưng đều thất bại.\n\nGợi ý: Thử link của từng video lẻ thay vì link danh sách."))
+
+    def _try_scan(self, link):
         cmd = [TOOL_PATH, "--dump-single-json", "--no-check-certificate", "--ignore-errors", link]
         
-        # UA Fix
+        # UA Fix - Use Desktop UA for Facebook to match Cookies better
         if "facebook.com" in link or "fb.watch" in link:
-             cmd.extend(["--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"])
+             # cmd.extend(["--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)..."]) # Old Mobile UA
+             cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"])
         else:
              cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
         
         if self.var_cookies.get():
-             cmd.extend(["--cookies-from-browser", "chrome"])
-
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-        stdout, stderr = process.communicate()
-        
-        if process.returncode != 0:
-             # Try Flat Playlist for non-channel lists? Or just report error
-             self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", f"Không tìm thấy video.\nChi tiết: {stderr[:200]}"))
-             return
+             if hasattr(self, 'cookie_file_path') and self.cookie_file_path and os.path.exists(self.cookie_file_path):
+                 print(f"Using cookie file: {self.cookie_file_path}")
+                 cmd.extend(["--cookies", self.cookie_file_path])
+             else:
+                 cmd.extend(["--cookies-from-browser", "chrome"])
 
         try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                 print(f"Scan failed for {link}: {stderr[:100]}")
+                 return False
+
             data = json.loads(stdout)
             entries = []
             if 'entries' in data: entries = list(data['entries'])
             else: entries = [data]
             
             entries = [e for e in entries if e]
-            self.process_entries(entries, link)
+            if not entries: return False
             
-        except  Exception as e:
-             self.gui_queue.put(lambda: messagebox.showerror("Lỗi Data", "Không đọc được dữ liệu JSON."))
+            self.process_entries(entries, link)
+            return True
+            
+        except Exception as e:
+             print(f"Error parsing JSON for {link}: {e}")
+             return False
 
     def scan_youtube_channel(self, link):
         # 1. Videos
@@ -561,37 +712,46 @@ class VideoDownloaderApp(ctk.CTk):
 
     def load_thumbnail_async(self, url, label_widget):
         if not url: return
-        try:
-             print(f"DEBUG: Downloading thumb: {url}")
-             # SSL Bypass context
-             ctx = ssl.create_default_context()
-             ctx.check_hostname = False
-             ctx.verify_mode = ssl.CERT_NONE
+        
+        # Set placeholder while loading
+        self.gui_queue.put(lambda: label_widget.configure(text="Loading...", text_color=COLORS["text_secondary"]))
 
-             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-             with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
-                 data = response.read()
-            
-             print(f"DEBUG: Thumb data len: {len(data)}")
-             import io
-             image_data = io.BytesIO(data)
-             pil_image = Image.open(image_data)
-             
-             # Resize to fit 80x50 (approx)
-             pil_image.thumbnail((120, 90)) 
-             
-             # Create CTkImage
-             ctk_img = ctk.CTkImage(light_image=pil_image, size=(80, 50))
-             
-             def update_label():
-                 if label_widget.winfo_exists():
-                     label_widget.configure(image=ctk_img, text="") 
-                     label_widget.image = ctk_img # FIX: Keep reference to avoid GC
-                     print("DEBUG: Thumbnail updated on UI")
-             
-             self.gui_queue.put(update_label)
-        except Exception as e:
-            print(f"ERROR loading thumb {url}: {e}")
+        def task():
+            try:
+                 print(f"DEBUG: Downloading thumb: {url}")
+                 # SSL Bypass context
+                 ctx = ssl.create_default_context()
+                 ctx.check_hostname = False
+                 ctx.verify_mode = ssl.CERT_NONE
+
+                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+                 with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
+                     data = response.read()
+                
+                 if not data: return
+
+                 import io
+                 image_data = io.BytesIO(data)
+                 pil_image = Image.open(image_data)
+                 
+                 # Resize to fit 80x50 (approx)
+                 pil_image.thumbnail((120, 90)) 
+                 
+                 # Create CTkImage
+                 ctk_img = ctk.CTkImage(light_image=pil_image, size=(80, 50))
+                 
+                 def update_label():
+                     if label_widget.winfo_exists():
+                         label_widget.configure(image=ctk_img, text="") 
+                         label_widget.image = ctk_img # FIX: Keep reference to avoid GC
+                         print("DEBUG: Thumbnail updated on UI")
+                 
+                 self.gui_queue.put(update_label)
+            except Exception as e:
+                print(f"ERROR loading thumb {url}: {e}")
+                self.gui_queue.put(lambda: label_widget.configure(text="No Image"))
+
+        threading.Thread(target=task, daemon=True).start()
 
     def check_history(self, vid_id):
         try:
@@ -608,23 +768,22 @@ class VideoDownloaderApp(ctk.CTk):
         except: pass
 
     def add_video_item(self, idx, title, vid_id, duration, quality, thumb_url=None, is_downloaded=False):
-        # Row Frame (White bg, defaults to white but hover changes it)
+        # Row Frame (Use Grid to match header)
         row = ctk.CTkFrame(self.scroll_frame, fg_color=COLORS["white"], corner_radius=0)
-        row.pack(fill="x")
+        row.pack(fill="x", pady=(0, 1)) # 1px gap for border effect
+
+        # Grid Config
+        row.grid_columnconfigure(0, weight=0, minsize=50) # Checkbox
+        row.grid_columnconfigure(1, weight=1)             # Name (Flexible)
+        row.grid_columnconfigure(2, weight=0, minsize=100) # Duration
+        row.grid_columnconfigure(3, weight=0, minsize=80)  # Quality
+        row.grid_columnconfigure(4, weight=0, minsize=120) # Status
+
+        # 1. Checkbox
+        f_chk = ctk.CTkFrame(row, fg_color="transparent", width=50, height=50)
+        f_chk.grid(row=0, column=0, sticky="nsew")
         
-        # Grid inside Row: [Chk] [VideoInfo] [Duration] [Quality] [Status]
-        # Main Grid is NOT used, we use Packing of frames with fixed widths to simulate columns
-        
-        inner = ctk.CTkFrame(row, fg_color="transparent")
-        inner.pack(fill="both", expand=True, pady=0)
-        
-        # 1. Checkbox (60px)
-        f_chk = ctk.CTkFrame(inner, width=60, fg_color="transparent")
-        f_chk.pack(side="left", fill="y")
-        f_chk.pack_propagate(False)
-        
-        var_chk = ctk.BooleanVar(value=not is_downloaded) # Default unchecked if downloaded
-        # Store
+        var_chk = ctk.BooleanVar(value=not is_downloaded) 
         if idx in self.video_data_map: self.video_data_map[idx]['var_chk'] = var_chk
         
         def on_toggle(): 
@@ -634,64 +793,56 @@ class VideoDownloaderApp(ctk.CTk):
                               fg_color=COLORS["blue_primary"], hover_color=COLORS["blue_primary"], border_width=2,
                               command=on_toggle)
         chk.place(relx=0.5, rely=0.5, anchor="center")
+
+        # 2. Thumbnail + Title (Horizontal)
+        f_info = ctk.CTkFrame(row, fg_color="transparent")
+        f_info.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         
-        # 2. Video Info (Flexible)
-        f_vid = ctk.CTkFrame(inner, fg_color="transparent")
-        f_vid.pack(side="left", fill="both", expand=True, padx=10, pady=12)
+        # Thumbnail Label
+        lbl_thumb = ctk.CTkLabel(f_info, text="", width=80, height=50, fg_color="#eee", corner_radius=6)
+        lbl_thumb.pack(side="left", padx=(0, 10))
         
-        # Thumb
-        thumb_label = ctk.CTkLabel(f_vid, text="", width=96, height=54, fg_color=COLORS["border"], corner_radius=6)
-        thumb_label.pack(side="left", padx=(0, 12))
+        # Text Info
+        f_text = ctk.CTkFrame(f_info, fg_color="transparent")
+        f_text.pack(side="left", fill="both", expand=True) # expand to take remaining width in f_info
         
+        lbl_title = ctk.CTkLabel(f_text, text=title, font=("Arial", 13, "bold"), text_color=COLORS["text_primary"], 
+                                 anchor="w", justify="left")
+        lbl_title.pack(fill="x", anchor="w")
+        
+        lbl_id = ctk.CTkLabel(f_text, text=f"ID: {vid_id}", font=("Arial", 11), text_color=COLORS["text_secondary"], anchor="w")
+        lbl_id.pack(fill="x", anchor="w")
+
+        # Load Thumb
         if thumb_url:
-             threading.Thread(target=self.load_thumbnail_async, args=(thumb_url, thumb_label), daemon=True).start()
+            self.load_thumbnail_async(thumb_url, lbl_thumb)
+
+        # 3. Duration
+        ctk.CTkLabel(row, text=str(duration), font=("Arial", 13), text_color=COLORS["text_secondary"]).grid(row=0, column=2, sticky="nsew")
+
+        # 4. Quality
+        ctk.CTkButton(row, text=quality, width=60, height=24, fg_color=COLORS["bg_main"], 
+                      text_color=COLORS["text_primary"], hover=False, font=("Arial", 11, "bold")).grid(row=0, column=3)
+
+        # 5. Status
+        lbl_status = ctk.CTkLabel(row, text="Chờ tải...", font=("Arial", 13), text_color=COLORS["text_secondary"])
+        lbl_status.grid(row=0, column=4, sticky="nsew")
         
-        # Text
-        f_text = ctk.CTkFrame(f_vid, fg_color="transparent")
-        f_text.pack(side="left", fill="both", expand=True) # Fill both to center vertically?
-        # Actually standard pack is top.
-        
-        # Title
-        lbl_title = ctk.CTkLabel(f_text, text=title, font=("Arial", 13, "bold"), text_color=COLORS["text_primary"], anchor="w")
-        lbl_title.pack(fill="x", pady=(4, 0))
-        # ID
-        ctk.CTkLabel(f_text, text=f"ID: {vid_id}", font=("Arial", 11), text_color=COLORS["text_secondary"], anchor="w").pack(fill="x")
-        
-        # 3. Duration (120px)
-        f_dur = ctk.CTkFrame(inner, width=120, fg_color="transparent")
-        f_dur.pack(side="left", fill="y")
-        f_dur.pack_propagate(False)
-        ctk.CTkLabel(f_dur, text=duration, font=("Arial", 13), text_color=COLORS["text_secondary"]).place(relx=0.5, rely=0.5, anchor="center")
-        
-        # 4. Quality (120px)
-        f_qual = ctk.CTkFrame(inner, width=120, fg_color="transparent")
-        f_qual.pack(side="left", fill="y")
-        f_qual.pack_propagate(False)
-        
-        q_badge = ctk.CTkLabel(f_qual, text=quality, fg_color=COLORS["bg_main"], text_color=COLORS["text_secondary"],
-                               corner_radius=6, font=("Arial", 11, "bold"), width=60, height=24)
-        q_badge.place(relx=0.5, rely=0.5, anchor="center")
-        
-        # 5. Status (150px)
-        f_stat = ctk.CTkFrame(inner, width=150, fg_color="transparent")
-        f_stat.pack(side="left", fill="y")
-        f_stat.pack_propagate(False)
-        
-        stat_lbl = ctk.CTkLabel(f_stat, text="Chờ tải...", font=("Arial", 12), text_color=COLORS["text_secondary"])
-        stat_lbl.place(relx=0.5, rely=0.5, anchor="center")
-        
+        # Store for updates
         if idx in self.video_data_map:
-             self.video_data_map[idx]['status_label'] = stat_lbl
+             self.video_data_map[idx]['status_label'] = lbl_status
         
-        # Border Bottom (Separator)
-        ctk.CTkFrame(row, height=1, fg_color=COLORS["bg_main"]).pack(side="bottom", fill="x") # bg_main is basically invisible on white, use border color
+        # Hover Effect
+        def on_enter(e): 
+             if row.winfo_exists(): row.configure(fg_color=COLORS["blue_light_bg"])
+        def on_leave(e): 
+             if row.winfo_exists(): row.configure(fg_color=COLORS["white"])
         
-        # Hover
-        def on_enter(e): row.configure(fg_color=COLORS["blue_light_bg"])
-        def on_leave(e): row.configure(fg_color=COLORS["white"])
         row.bind("<Enter>", on_enter)
         row.bind("<Leave>", on_leave)
         
+        # Propagate click to checkbox (optional, but nice UX)
+        # row.bind("<Button-1>", lambda e: chk.toggle() or on_toggle())
         self.update_selection_count()
 
     def update_selection_count(self):
@@ -799,7 +950,10 @@ class VideoDownloaderApp(ctk.CTk):
 
              # Cookies
              if use_cookies:
-                 cmd.extend(["--cookies-from-browser", "chrome"])
+                 if hasattr(self, 'cookie_file_path') and self.cookie_file_path and os.path.exists(self.cookie_file_path):
+                     cmd.extend(["--cookies", self.cookie_file_path])
+                 else:
+                     cmd.extend(["--cookies-from-browser", "chrome"])
 
              cmd.extend(["--no-part", url])
              

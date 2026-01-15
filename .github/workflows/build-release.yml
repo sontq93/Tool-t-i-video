@@ -1,11 +1,9 @@
-name: Build TikTok Downloader
+name: Build Video Downloader Pro V5
 
 on:
-  # Tự động chạy khi push tag mới (ví dụ: v5.0)
   push:
     tags:
       - 'v*'
-  # Hoặc chạy thủ công từ GitHub UI
   workflow_dispatch:
 
 jobs:
@@ -14,14 +12,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-11, windows-latest]  # Changed from macos-latest to macos-11
+        os: [macos-latest, windows-latest] # Updated to latest
         include:
-          - os: macos-11
-            artifact_name: TikTokDownloader_V4.app
+          - os: macos-latest
+            artifact_name: VideoDownloaderProV5.app
+            zip_name: VideoDownloaderProV5_macOS.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
             yt_dlp_name: yt-dlp
           - os: windows-latest
-            artifact_name: TikTokDownloader_V4.exe
+            artifact_name: VideoDownloaderProV5.exe
+            zip_name: VideoDownloaderProV5_Windows.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
             yt_dlp_name: yt-dlp.exe
 
@@ -32,10 +32,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'  # Changed from 3.12 to 3.10 for better compatibility
+          python-version: '3.10'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install Dependencies
+        run: |
+          pip install pyinstaller customtkinter Pillow
 
       - name: Download yt-dlp
         run: |
@@ -43,48 +44,49 @@ jobs:
         shell: bash
 
       - name: Make yt-dlp executable (macOS only)
-        if: matrix.os == 'macos-11'
+        if: matrix.os == 'macos-latest'
         run: chmod +x yt-dlp
 
       - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-11'
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "10.13"  # Ensure compatibility with macOS 10.13+
+        if: matrix.os == 'macos-latest'
         run: |
           pyinstaller --noconfirm --onefile --windowed \
-            --name "TikTokDownloader_V4" \
+            --name "VideoDownloaderProV5" \
             --add-binary "yt-dlp:." \
-            app_tai_video_v4.py
+            --hidden-import "PIL" \
+            --hidden-import "PIL._tkinter_finder" \
+            --collect-all "customtkinter" \
+            app_v5.py
 
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "TikTokDownloader_V4" --add-binary "yt-dlp.exe;." app_tai_video_v4.py
+          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV5" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --collect-all "customtkinter" app_v5.py
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
-        if: matrix.os == 'macos-11'
-        run: xattr -cr dist/TikTokDownloader_V4.app
+        if: matrix.os == 'macos-latest'
+        run: xattr -cr dist/VideoDownloaderProV5.app
 
       - name: Zip macOS app
-        if: matrix.os == 'macos-11'
+        if: matrix.os == 'macos-latest'
         run: |
           cd dist
-          zip -r TikTokDownloader_V4_macOS.zip TikTokDownloader_V4.app
+          zip -r VideoDownloaderProV5_macOS.zip VideoDownloaderProV5.app
 
       - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-11'
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: TikTokDownloader_V4_macOS
-          path: dist/TikTokDownloader_V4_macOS.zip
+          name: VideoDownloaderProV5_macOS
+          path: dist/VideoDownloaderProV5_macOS.zip
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: TikTokDownloader_V4_Windows
-          path: dist/TikTokDownloader_V4.exe
+          name: VideoDownloaderProV5_Windows
+          path: dist/VideoDownloaderProV5.exe
 
   release:
     name: Create Release
@@ -96,19 +98,19 @@ jobs:
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: TikTokDownloader_V4_macOS
+          name: VideoDownloaderProV5_macOS
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: TikTokDownloader_V4_Windows
+          name: VideoDownloaderProV5_Windows
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            TikTokDownloader_V4_macOS.zip
-            TikTokDownloader_V4.exe
+            VideoDownloaderProV5_macOS.zip
+            VideoDownloaderProV5.exe
           draft: false
           prerelease: false
         env:
