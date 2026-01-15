@@ -14,9 +14,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-11, windows-latest]  # Changed from macos-latest to macos-11
         include:
-          - os: macos-latest
+          - os: macos-11
             artifact_name: TikTokDownloader_V4.app
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
             yt_dlp_name: yt-dlp
@@ -32,7 +32,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'  # Changed from 3.12 to 3.10 for better compatibility
 
       - name: Install PyInstaller
         run: pip install pyinstaller
@@ -43,11 +43,13 @@ jobs:
         shell: bash
 
       - name: Make yt-dlp executable (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-11'
         run: chmod +x yt-dlp
 
       - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-11'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.13"  # Ensure compatibility with macOS 10.13+
         run: |
           pyinstaller --noconfirm --onefile --windowed \
             --name "TikTokDownloader_V4" \
@@ -61,17 +63,17 @@ jobs:
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-11'
         run: xattr -cr dist/TikTokDownloader_V4.app
 
       - name: Zip macOS app
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-11'
         run: |
           cd dist
           zip -r TikTokDownloader_V4_macOS.zip TikTokDownloader_V4.app
 
       - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-11'
         uses: actions/upload-artifact@v4
         with:
           name: TikTokDownloader_V4_macOS
