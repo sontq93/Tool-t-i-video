@@ -34,8 +34,8 @@ class FacebookScanner:
             
     def scan(self, url, status_callback=None):
         """
-        Scans a Facebook URL using Selenium to get video links.
-        Returns a list of unique video URLs.
+        Scans a Facebook URL using Selenium to get video links and metadata.
+        Returns a list of dicts: [{'url':..., 'thumbnail':..., 'duration':...}]
         """
         options = Options()
         options.add_argument("--headless") # Invisible mode
@@ -48,6 +48,7 @@ class FacebookScanner:
         
         driver = None
         unique_links = set()
+        results = []
         
         try:
             if status_callback: status_callback("Đang khởi động Robot quét...")
@@ -58,10 +59,9 @@ class FacebookScanner:
             driver.get(url)
             
             # Close popup if exists (Login popup)
-            video_links = set()
             last_height = driver.execute_script("return document.body.scrollHeight")
             scroll_count = 0
-            max_scrolls = 50 # Limit to prevent infinite loops (adjust as needed)
+            max_scrolls = 60 # Limit to prevent infinite loops
             
             import time
             while scroll_count < max_scrolls:
@@ -69,9 +69,9 @@ class FacebookScanner:
                 
                 # Scroll down
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3) # Wait for load (Facebook is slow)
+                time.sleep(2.5) # Wait for load
                 
-                # Extract Links
+                # Extract Links AND Metadata
                 elements = driver.find_elements(By.TAG_NAME, "a")
                 for elem in elements:
                     try:
@@ -79,25 +79,43 @@ class FacebookScanner:
                         if href:
                             # Filter relevant video links
                             if any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
-                                # Clean URL (Facebook adds a lot of tracking params)
+                                # Clean URL
                                 clean_url = href.split("?")[0]
                                 if clean_url not in unique_links:
                                     unique_links.add(clean_url)
-                                    print(f"Found FB Link: {clean_url}")
+                                    
+                                    # Try to get Thumbnail
+                                    thumb_url = None
+                                    try:
+                                        imgs = elem.find_elements(By.TAG_NAME, "img")
+                                        if imgs: 
+                                            thumb_url = imgs[0].get_attribute("src")
+                                    except: pass
+                                    
+                                    # Try to get Duration (often in a span typical for video time)
+                                    # This is hard on FB, just a best effort scan of text in parent
+                                    duration_text = None
+                                    
+                                    print(f"Found FB Link: {clean_url} | Thumb: {bool(thumb_url)}")
+                                    results.append({
+                                        'url': clean_url,
+                                        'thumbnail': thumb_url,
+                                        'duration': None # Too hard to reliably scrape duration in headless without rendering issues
+                                    })
+                                    
                     except: pass
                 
                 # Check scroll height
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
-                    # Try one more wait
                     time.sleep(2)
                     new_height = driver.execute_script("return document.body.scrollHeight")
                     if new_height == last_height:
-                        break # End of page
+                        break 
                 last_height = new_height
                 scroll_count += 1
             
-            if status_callback: status_callback(f"Đã quét xong! Tìm thấy {len(unique_links)} video.")
+            if status_callback: status_callback(f"Đã quét xong! Tìm thấy {len(results)} video.")
                 
         except Exception as e:
             print(f"Selenium Scan Error: {e}")
@@ -105,7 +123,7 @@ class FacebookScanner:
         finally:
             if driver: driver.quit()
             
-        return list(unique_links)
+        return results
 
 
 # --- CONSTANTS & CONFIG ---
@@ -646,12 +664,16 @@ class VideoDownloaderApp(ctk.CTk):
              return False
 
         entries = []
-        for v_url in video_urls:
+        for v_item in video_urls:
+            v_url = v_item['url']
+            v_thumb = v_item['thumbnail']
+            
             entries.append({
                 'id': v_url,
                 'title': f"Facebook Video {v_url[-15:]}...", 
                 'url': v_url,
                 'webpage_url': v_url,
+                'thumbnail': v_thumb,
                 'duration': None,
                 'resolution': 'Unknown'
             })
