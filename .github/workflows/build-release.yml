@@ -32,16 +32,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Install Python 3.9 from source (macOS)
+        if: matrix.os == 'macos-15-intel'
+        run: |
+          brew update
+          brew install openssl readline sqlite3 xz zlib
+          export CFLAGS="-I$(brew --prefix openssl)/include -I$(brew --prefix readline)/include -I$(brew --prefix sqlite3)/include"
+          export LDFLAGS="-L$(brew --prefix openssl)/lib -L$(brew --prefix readline)/lib -L$(brew --prefix sqlite3)/lib"
+          export MACOSX_DEPLOYMENT_TARGET=10.15
+          curl https://pyenv.run | bash
+          export PATH="$HOME/.pyenv/bin:$PATH"
+          eval "$(pyenv init -)"
+          pyenv install 3.9.18
+          pyenv global 3.9.18
+          pip install --upgrade pip
+          pip install pyinstaller customtkinter Pillow
+          echo "$HOME/.pyenv/shims" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Set up Python (Windows)
+        if: matrix.os == 'windows-latest'
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           architecture: 'x64'
 
-      - name: Install Dependencies
-        run: |
-          pip install pyinstaller customtkinter Pillow
-
+      - name: Install Dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: pip install pyinstaller customtkinter Pillow
       - name: Download yt-dlp
         run: |
           curl -L ${{ matrix.yt_dlp_url }} -o ${{ matrix.yt_dlp_name }}
