@@ -58,18 +58,26 @@ class FacebookScanner:
             if status_callback: status_callback(f"Đang truy cập: {url}")
             driver.get(url)
             
-            # Close popup if exists (Login popup)
+            # Popup Handling Logic
+            from selenium.webdriver.common.keys import Keys
+            
             last_height = driver.execute_script("return document.body.scrollHeight")
             scroll_count = 0
-            max_scrolls = 60 # Limit to prevent infinite loops
+            max_scrolls = 60 # Limit
+            retry_scrolls = 0
             
             import time
             while scroll_count < max_scrolls:
-                if status_callback: status_callback(f"Đang cuộn trang ({scroll_count}/{max_scrolls})...")
+                if status_callback: status_callback(f"Đang cuộn trang ({scroll_count})...")
                 
+                # Try to close Login Popup periodically
+                try:
+                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                except: pass
+
                 # Scroll down
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2.5) # Wait for load
+                time.sleep(3) # Increased wait
                 
                 # Extract Links AND Metadata
                 elements = driver.find_elements(By.TAG_NAME, "a")
@@ -77,41 +85,37 @@ class FacebookScanner:
                     try:
                         href = elem.get_attribute("href")
                         if href:
-                            # Filter relevant video links
                             if any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
-                                # Clean URL
                                 clean_url = href.split("?")[0]
                                 if clean_url not in unique_links:
                                     unique_links.add(clean_url)
                                     
-                                    # Try to get Thumbnail
+                                    # Thumbnail
                                     thumb_url = None
                                     try:
                                         imgs = elem.find_elements(By.TAG_NAME, "img")
-                                        if imgs: 
-                                            thumb_url = imgs[0].get_attribute("src")
+                                        if imgs: thumb_url = imgs[0].get_attribute("src")
                                     except: pass
                                     
-                                    # Try to get Duration (often in a span typical for video time)
-                                    # This is hard on FB, just a best effort scan of text in parent
-                                    duration_text = None
-                                    
-                                    print(f"Found FB Link: {clean_url} | Thumb: {bool(thumb_url)}")
+                                    print(f"Found FB Link: {clean_url}")
                                     results.append({
                                         'url': clean_url,
                                         'thumbnail': thumb_url,
-                                        'duration': None # Too hard to reliably scrape duration in headless without rendering issues
+                                        'duration': None 
                                     })
-                                    
                     except: pass
                 
                 # Check scroll height
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
+                    retry_scrolls += 1
+                    if status_callback: status_callback(f"Đang chờ tải thêm ({retry_scrolls}/3)...")
+                    if retry_scrolls >= 3:
+                        break # Really end of page
                     time.sleep(2)
-                    new_height = driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        break 
+                else:
+                    retry_scrolls = 0 # Reset retry if successful
+                    
                 last_height = new_height
                 scroll_count += 1
             
