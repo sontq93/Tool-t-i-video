@@ -202,13 +202,24 @@ class VideoDownloaderApp(ctk.CTk):
         self.var_cookies = ctk.BooleanVar(value=False)
         self.chk_cookies = create_option_card(controls_inner, "Sử dụng Cookies", "Dùng cho video riêng tư/hạn chế", self.var_cookies)
         
-        # Cookie File Selection (Optional)
+        # Cookie Source Selection
+        self.cookie_source_var = ctk.StringVar(value="File cookies.txt")
+        self.combo_cookie_source = ctk.CTkComboBox(controls_inner, 
+                                                   values=["File cookies.txt", "Chrome", "Safari", "Edge", "Firefox", "Opera", "Brave", "Vivaldi", "Chromium"],
+                                                   variable=self.cookie_source_var,
+                                                   command=self.on_cookie_source_change)
+        self.combo_cookie_source.pack(fill="x", pady=(0, 6))
+
+        # Cookie File Selection Button (Dynamic)
         self.cookie_file_path = None
-        self.btn_cookie_file = ctk.CTkButton(controls_inner, text="Chọn file cookies.txt (Khuyên dùng)", 
+        self.btn_cookie_file = ctk.CTkButton(controls_inner, text="Chọn file cookies.txt", 
                                              height=30, fg_color=COLORS["bg_sidebar"], text_color=COLORS["blue_primary"],
                                              border_width=1, border_color=COLORS["blue_primary"],
                                              command=self.select_cookie_file)
         self.btn_cookie_file.pack(fill="x", pady=(0, 10))
+
+        # Initial State
+        self.on_cookie_source_change("File cookies.txt")
         
         # 3. Footer Actions (Scan & Fast DL)
         # We pack this into self.sidebar BOTTOM so it stays fixed
@@ -452,6 +463,13 @@ class VideoDownloaderApp(ctk.CTk):
             self.btn_cookie_file.configure(text=f"File: {os.path.basename(filename)}", fg_color=COLORS["blue_light_bg"])
             messagebox.showinfo("Cookies", "Đã chọn file cookies.\nLưu ý: File phải đúng định dạng Netscape/Mozilla cookies.")
 
+    def on_cookie_source_change(self, choice):
+        if choice == "File cookies.txt":
+            self.btn_cookie_file.pack(fill="x", pady=(0, 10)) # Show button
+        else:
+            self.btn_cookie_file.pack_forget() # Hide button
+            self.var_cookies.set(True) # Auto enable cookies if browser selected
+
     def log_msg(self, msg):
         print(msg) # For now print to console, could add a status label later
         # Could update the lbl_count or a toast
@@ -582,11 +600,15 @@ class VideoDownloaderApp(ctk.CTk):
              cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
         
         if self.var_cookies.get():
-             if hasattr(self, 'cookie_file_path') and self.cookie_file_path and os.path.exists(self.cookie_file_path):
-                 print(f"Using cookie file: {self.cookie_file_path}")
-                 cmd.extend(["--cookies", self.cookie_file_path])
+             source = self.cookie_source_var.get()
+             if source == "File cookies.txt":
+                 if hasattr(self, 'cookie_file_path') and self.cookie_file_path and os.path.exists(self.cookie_file_path):
+                     print(f"Using cookie file: {self.cookie_file_path}")
+                     cmd.extend(["--cookies", self.cookie_file_path])
              else:
-                 cmd.extend(["--cookies-from-browser", "chrome"])
+                 # Browser source
+                 print(f"Using cookies from browser: {source}")
+                 cmd.extend(["--cookies-from-browser", source.lower()])
 
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
@@ -959,10 +981,12 @@ class VideoDownloaderApp(ctk.CTk):
 
              # Cookies
              if use_cookies:
-                 if hasattr(self, 'cookie_file_path') and self.cookie_file_path and os.path.exists(self.cookie_file_path):
-                     cmd.extend(["--cookies", self.cookie_file_path])
+                 source = self.cookie_source_var.get()
+                 if source == "File cookies.txt":
+                     if hasattr(self, 'cookie_file_path') and self.cookie_file_path and os.path.exists(self.cookie_file_path):
+                         cmd.extend(["--cookies", self.cookie_file_path])
                  else:
-                     cmd.extend(["--cookies-from-browser", "chrome"])
+                     cmd.extend(["--cookies-from-browser", source.lower()])
 
              cmd.extend(["--no-part", url])
              
