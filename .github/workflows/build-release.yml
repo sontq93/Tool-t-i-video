@@ -11,6 +11,8 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
     strategy:
       matrix:
         os: [macos-15-intel, windows-latest] # Upgraded to macos-15-intel for continued legacy support.
