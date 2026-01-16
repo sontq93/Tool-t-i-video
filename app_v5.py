@@ -196,8 +196,17 @@ class FacebookScanner:
                             
                         last_height = new_height
                         scroll_count += 1
+                        last_height = new_height
+                        scroll_count += 1
+                        
                 except Exception as sub_e:
                     print(f"Error scanning tab {target_url}: {sub_e}")
+                
+                # Notify switch
+                if idx < len(targets) - 1:
+                     next_tab = "Reels" if "reels" in targets[idx+1] else "Videos"
+                     if status_callback: status_callback(f"✅ Xong {tab_name}. Đang chuyển sang {next_tab}...")
+                     time.sleep(2)
                     
             if status_callback: status_callback(f"Đã quét xong! Tổng: {len(results)} video.")
                 
@@ -1342,8 +1351,11 @@ class VideoDownloaderApp(ctk.CTk):
         self.gui_queue.put(lambda: self.btn_cancel.configure(text="Hủy bỏ", command=original_cancel_cmd, fg_color="transparent", hover_color="#e5e7eb"))
         self.gui_queue.put(lambda: self.btn_download.configure(state="normal", text=f"Tải Xuống ({success_count}/{total})")) 
         
-        msg_title = "Đã dừng" if self.stop_download_flag else "Hoàn tất"
-        self.gui_queue.put(lambda: messagebox.showinfo(msg_title, f"Xử lý xong {i}/{total} video.\nThành công: {success_count}"))
+        if getattr(self, 'stop_download_flag', False):
+             self.gui_queue.put(lambda: messagebox.showinfo("Đã dừng tải", f"🛑 Bạn đã dừng quá trình tải.\n\n✅ Đã tải: {success_count} video\n❌ Lỗi/Bỏ qua: {(i if 'i' in locals() else processed_count) - success_count}"))
+        else:
+             self.gui_queue.put(lambda: messagebox.showinfo("Hoàn tất", f"✅ Tải xuống hoàn tất!\n\nTổng cộng: {total}\nThành công: {success_count}\nLỗi: {total - success_count}"))
+        
         self.gui_queue.put(lambda: self.btn_download.configure(state="normal", text="Tải Xuống Ngay"))
 
     def check_queue(self):
