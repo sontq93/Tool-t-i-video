@@ -93,45 +93,46 @@ class FacebookScanner:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-notifications")
         options.add_argument("--mute-audio")
-        # Randomize UA
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        # Larger window and zoom out is crucial for FB infinite scroll
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         
         driver = None
         unique_links = set()
         results = []
         
         try:
-            if status_callback: status_callback("Đang khởi động Robot quét...")
+            if status_callback: status_callback("Đang khởi động Robot sâu...")
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
             
             if status_callback: status_callback(f"Đang truy cập: {url}")
             driver.get(url)
+            time.sleep(3)
             
+            # Zoom out logic (Execute script)
+            try: driver.execute_script("document.body.style.zoom='50%'")
+            except: pass
+
             # Popup Handling Logic
             from selenium.webdriver.common.keys import Keys
             
             last_height = driver.execute_script("return document.body.scrollHeight")
             scroll_count = 0
-            max_scrolls = 60 # Limit
+            max_scrolls = 100 # Increased limit
             retry_scrolls = 0
             
             import time
             while scroll_count < max_scrolls:
                 if status_callback: status_callback(f"Đang cuộn trang ({scroll_count})...")
                 
-                # Try to close Login Popup periodically
-                try:
-                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                # Close Popup
+                try: driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
                 except: pass
 
-                # Scroll Logic (Keys.END is more reliable for FB)
-                try:
-                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.END)
-                except:
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                
-                time.sleep(4) # Wait longer for network
+                # Aggressive Scroll: Scroll down by large chunk
+                driver.execute_script("window.scrollBy(0, 1500);")
+                time.sleep(1) # Short wait for render
                 
                 # Extract Links AND Metadata
                 elements = driver.find_elements(By.TAG_NAME, "a")
@@ -147,21 +148,15 @@ class FacebookScanner:
                                 thumb_url = None
                                 duration_text = None
                                 try:
-                                    # Thumb
+                                    # Thumb (look deep)
                                     imgs = elem.find_elements(By.TAG_NAME, "img")
                                     if imgs: thumb_url = imgs[0].get_attribute("src")
                                     
-                                    # Duration (Search in all text and aria-labels)
-                                    text_content = elem.text + " " + elem.get_attribute("innerText")
-                                    # Also check aria-label
-                                    aria = elem.get_attribute("aria-label")
-                                    if aria: text_content += " " + aria
-                                    
+                                    # Duration (Search in all text)
+                                    text_content = elem.get_attribute("innerText") or ""
                                     # Look for M:SS pattern
                                     dur_match = re.search(r'(\d+:\d+)', text_content)
-                                    if dur_match: 
-                                        duration_text = dur_match.group(1)
-                                        print(f"  Got Duration: {duration_text}")
+                                    if dur_match: duration_text = dur_match.group(1)
                                 except: pass
                                 
                                 results.append({
@@ -171,16 +166,23 @@ class FacebookScanner:
                                 })
                     except: pass
                 
-                # Check scroll height
+                # Check scroll height status
                 new_height = driver.execute_script("return document.body.scrollHeight")
+                
+                # If we haven't moved much effective height, try forcing to bottom
+                if scroll_count % 5 == 0:
+                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                     time.sleep(2)
+
+                # Termination check
                 if new_height == last_height:
                     retry_scrolls += 1
-                    if status_callback: status_callback(f"Đang chờ tải thêm ({retry_scrolls}/3)...")
-                    if retry_scrolls >= 3:
-                        break # Really end of page
+                    if status_callback: status_callback(f"Đang tìm thêm ({retry_scrolls}/5)...")
+                    if retry_scrolls >= 5: # Give it 5 tries
+                        break 
                     time.sleep(2)
                 else:
-                    retry_scrolls = 0 # Reset retry if successful
+                    retry_scrolls = 0
                     
                 last_height = new_height
                 scroll_count += 1
@@ -189,7 +191,7 @@ class FacebookScanner:
                 
         except Exception as e:
             print(f"Selenium Scan Error: {e}")
-            if status_callback: status_callback(f"Lỗi quét Robot: {e}")
+            if status_callback: status_callback(f"Lỗi Robot: {e}")
         finally:
             if driver: driver.quit()
             
