@@ -84,16 +84,14 @@ class FacebookScanner:
             
     def scan(self, url, status_callback=None):
         """
-        Scans a Facebook URL using Selenium to get video links and metadata.
-        Returns a list of dicts: [{'url':..., 'thumbnail':..., 'duration':...}]
+        Scans a Facebook URL. If a root profile is given, scans both /videos and /reels.
         """
         options = Options()
-        options.add_argument("--headless") # Invisible mode
+        options.add_argument("--headless")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-notifications")
         options.add_argument("--mute-audio")
-        # Larger window and zoom out is crucial for FB infinite scroll
         options.add_argument("--window-size=1920,1080")
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         
@@ -101,97 +99,111 @@ class FacebookScanner:
         unique_links = set()
         results = []
         
+        # Determine Scan Targets
+        targets = [url]
+        clean_input = url.split('?')[0].rstrip('/')
+        
+        # Heuristic: If URL is just a profile/page (no /videos, /reels, /posts, /watch)
+        # We auto-expand to scan BOTH '/videos' and '/reels'
+        if "facebook.com" in clean_input:
+            if not any(x in clean_input for x in ["/videos", "/reels", "/watch", "/posts", "/photo", "/groups"]):
+                print("Detected Root URL -> Smart Scan: Videos + Reels")
+                targets = [f"{clean_input}/videos", f"{clean_input}/reels"]
+        
         try:
-            if status_callback: status_callback("Đang khởi động Robot sâu...")
+            if status_callback: status_callback("Đang khởi động Robot thông minh...")
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
             
-            if status_callback: status_callback(f"Đang truy cập: {url}")
-            driver.get(url)
-            time.sleep(3)
-            
-            # Zoom out logic (Execute script)
-            try: driver.execute_script("document.body.style.zoom='50%'")
-            except: pass
-
-            # Popup Handling Logic
-            from selenium.webdriver.common.keys import Keys
-            
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            scroll_count = 0
-            max_scrolls = 100 # Increased limit
-            retry_scrolls = 0
-            
-            import time
-            while scroll_count < max_scrolls:
-                if status_callback: status_callback(f"Đang cuộn trang ({scroll_count})...")
+            # Iterate through all targets (e.g. Videos then Reels)
+            for idx, target_url in enumerate(targets):
+                tab_name = "Reels" if "/reels" in target_url else "Videos"
+                if status_callback: status_callback(f"Đang quét mục {tab_name} ({idx+1}/{len(targets)})...")
                 
-                # Close Popup
-                try: driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-                except: pass
-
-                # Aggressive Scroll: Scroll down by large chunk
-                driver.execute_script("window.scrollBy(0, 1500);")
-                time.sleep(1) # Short wait for render
-                
-                # Extract Links AND Metadata
-                elements = driver.find_elements(By.TAG_NAME, "a")
-                for elem in elements:
-                    try:
-                        href = elem.get_attribute("href")
-                        if href and any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
-                            clean_url = href.split("?")[0]
-                            if clean_url not in unique_links:
-                                unique_links.add(clean_url)
-                                
-                                # Thumbnail & Duration
-                                thumb_url = None
-                                duration_text = None
-                                try:
-                                    # Thumb (look deep)
-                                    imgs = elem.find_elements(By.TAG_NAME, "img")
-                                    if imgs: thumb_url = imgs[0].get_attribute("src")
-                                    
-                                    # Duration (Search in all text)
-                                    text_content = elem.get_attribute("innerText") or ""
-                                    # Look for M:SS pattern
-                                    dur_match = re.search(r'(\d+:\d+)', text_content)
-                                    if dur_match: duration_text = dur_match.group(1)
-                                except: pass
-                                
-                                results.append({
-                                    'url': clean_url,
-                                    'thumbnail': thumb_url,
-                                    'duration': duration_text 
-                                })
+                try:
+                    driver.get(target_url)
+                    time.sleep(3)
+                    
+                    # Zoom out
+                    try: driver.execute_script("document.body.style.zoom='50%'")
                     except: pass
-                
-                # Check scroll height status
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                
-                # If we haven't moved much effective height, try forcing to bottom
-                if scroll_count % 5 == 0:
-                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                     time.sleep(2)
-
-                # Termination check
-                if new_height == last_height:
-                    retry_scrolls += 1
-                    if status_callback: status_callback(f"Đang tìm thêm ({retry_scrolls}/5)...")
-                    if retry_scrolls >= 5: # Give it 5 tries
-                        break 
-                    time.sleep(2)
-                else:
+                    
+                    # Popup Handling
+                    from selenium.webdriver.common.keys import Keys
+                    
+                    last_height = driver.execute_script("return document.body.scrollHeight")
+                    scroll_count = 0
+                    max_scrolls = 100 
                     retry_scrolls = 0
                     
-                last_height = new_height
-                scroll_count += 1
-            
-            if status_callback: status_callback(f"Đã quét xong! Tìm thấy {len(results)} video.")
+                    import time
+                    while scroll_count < max_scrolls:
+                        if status_callback: status_callback(f"Quét {tab_name}: Cuộn {scroll_count}...")
+                        
+                        try: driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                        except: pass
+
+                        # Scroll
+                        driver.execute_script("window.scrollBy(0, 1500);")
+                        time.sleep(1)
+                        
+                        # Extract
+                        elements = driver.find_elements(By.TAG_NAME, "a")
+                        for elem in elements:
+                            try:
+                                href = elem.get_attribute("href")
+                                if href and any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
+                                    clean_link = href.split("?")[0]
+                                    if clean_link not in unique_links:
+                                        unique_links.add(clean_link)
+                                        
+                                        # Metadata
+                                        thumb_url = None
+                                        duration_text = None
+                                        try:
+                                            imgs = elem.find_elements(By.TAG_NAME, "img")
+                                            if imgs: thumb_url = imgs[0].get_attribute("src")
+                                            
+                                            text_content = elem.get_attribute("innerText") or ""
+                                            aria = elem.get_attribute("aria-label") or ""
+                                            full_text = text_content + " " + aria
+                                            
+                                            dur_match = re.search(r'(\d+:\d+)', full_text)
+                                            if dur_match: duration_text = dur_match.group(1)
+                                        except: pass
+                                        
+                                        results.append({
+                                            'url': clean_link,
+                                            'thumbnail': thumb_url,
+                                            'duration': duration_text 
+                                        })
+                            except: pass
+                        
+                        # Check progress
+                        new_height = driver.execute_script("return document.body.scrollHeight")
+                        
+                        if scroll_count % 5 == 0:
+                             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                             time.sleep(2)
+
+                        if new_height == last_height:
+                            retry_scrolls += 1
+                            if status_callback: status_callback(f"Đang tìm thêm {tab_name} ({retry_scrolls}/5)...")
+                            if retry_scrolls >= 5: break 
+                            time.sleep(2)
+                        else:
+                            retry_scrolls = 0
+                            
+                        last_height = new_height
+                        scroll_count += 1
+                except Exception as sub_e:
+                    print(f"Error scanning tab {target_url}: {sub_e}")
+                    
+            if status_callback: status_callback(f"Đã quét xong! Tổng: {len(results)} video.")
                 
         except Exception as e:
             print(f"Selenium Scan Error: {e}")
-            if status_callback: status_callback(f"Lỗi Robot: {e}")
+            if status_callback: status_callback(f"Lỗi hệ thống: {e}")
         finally:
             if driver: driver.quit()
             
