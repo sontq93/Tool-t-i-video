@@ -472,17 +472,25 @@ class VideoDownloaderApp(ctk.CTk):
         
         self.video_data_map.clear()
         
+        # Facebook Cookie Warning
+        if ("facebook.com" in link or "fb.watch" in link) and not self.var_cookies.get():
+             resp = messagebox.askyesno("Cảnh báo Facebook", "Facebook thường yêu cầu Cookies để quét được đầy đủ danh sách video.\n\nBạn chưa chọn 'Sử dụng Cookies'.\nBạn có chắc chắn muốn tiếp tục không?\n(Chọn 'No' để quay lại thêm Cookies)")
+             if not resp: return
+
         threading.Thread(target=self.run_scan_logic, args=(link,), daemon=True).start()
 
     def run_scan_logic(self, link):
         try:
-            # Auto fix Facebook link (DISABLED to prevent issues with Playlists/Profiles)
-            # if "facebook.com" in link or "fb.watch" in link:
-            #     # Don't modify if it looks like a specific video, reel, or playlist/album
-            #     keywords = ["videos", "reels", "watch", "playlist", "set=", "media"]
-            #     if not any(k in link for k in keywords):
-            #         if link.endswith("/"): link = link[:-1]
-            #         link += "/videos"
+            # Auto fix Facebook link
+            if "facebook.com" in link or "fb.watch" in link:
+                # Don't modify if it looks like a specific video, reel, or playlist/album
+                keywords = ["/videos", "/reels", "watch", "playlist", "set=", "media", "/posts/", "/story"]
+                if not any(k in link for k in keywords):
+                    # It's likely a profile or page URL (e.g. facebook.com/pageName)
+                    # We prefer scanning the /videos tab
+                    base_link = link.rstrip("/")
+                    link = base_link + "/videos"
+                    print(f"DEBUG: Auto-converted to video tab: {link}")
             
             # 1. Check Channel vs Video
             is_youtube_channel = ("youtube.com" in link) and ("youtu.be" not in link)
