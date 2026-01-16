@@ -14,6 +14,56 @@ import re
 import urllib.request
 import ssl
 
+# Error Mapping
+ERROR_MAP = {
+    "HTTP Error": "Lỗi kết nối mạng/Server",
+    "403": "Bị chặn (403) - Cần cập nhật Cookie",
+    "Sign in": "Cần đăng nhập (Video hạn chế)",
+    "Video unavailable": "Video đã bị xóa/ẩn",
+    "This video is private": "Video riêng tư",
+    "No video formats": "Không tìm thấy video (Chỉ có ảnh?)",
+    "requested format": "Định dạng không hỗ trợ",
+    "Fragment": "Lỗi ghép file video"
+}
+
+class ToolTip(object):
+    def __init__(self, widget):
+        self.widget = widget
+        self.tipwindow = None
+        self.id = None
+        self.x = self.y = 0
+
+    def showtip(self, text):
+        "Display text in tooltip window"
+        self.text = text
+        if self.tipwindow or not self.text:
+            return
+        x, y, cx, cy = self.widget.bbox("insert")
+        x = x + self.widget.winfo_rootx() + 25
+        y = y + cy + self.widget.winfo_rooty() + 25
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(1)
+        tw.wm_geometry("+%d+%d" % (x, y))
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                      background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                      font=("tahoma", "8", "normal"))
+        label.pack(ipadx=1)
+
+    def hidetip(self):
+        tw = self.tipwindow
+        self.tipwindow = None
+        if tw:
+            tw.destroy()
+
+def CreateToolTip(widget, text):
+    toolTip = ToolTip(widget)
+    def enter(event):
+        toolTip.showtip(text)
+    def leave(event):
+        toolTip.hidetip()
+    widget.bind('<Enter>', enter)
+    widget.bind('<Leave>', leave)
+
 # Selenium Imports
 try:
     from selenium import webdriver
@@ -75,13 +125,13 @@ class FacebookScanner:
                     driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
                 except: pass
 
-                # Scroll down with wiggle
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1)
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 700);")
-                time.sleep(1)
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3) # Wait for load
+                # Scroll Logic (Keys.END is more reliable for FB)
+                try:
+                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.END)
+                except:
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                
+                time.sleep(4) # Wait longer for network
                 
                 # Extract Links AND Metadata
                 elements = driver.find_elements(By.TAG_NAME, "a")
@@ -101,11 +151,17 @@ class FacebookScanner:
                                     imgs = elem.find_elements(By.TAG_NAME, "img")
                                     if imgs: thumb_url = imgs[0].get_attribute("src")
                                     
-                                    # Duration (Regex search in element text)
-                                    text = elem.text or elem.get_attribute("innerText")
-                                    if text:
-                                        dur_match = re.search(r'(\d+:\d+)', text)
-                                        if dur_match: duration_text = dur_match.group(1)
+                                    # Duration (Search in all text and aria-labels)
+                                    text_content = elem.text + " " + elem.get_attribute("innerText")
+                                    # Also check aria-label
+                                    aria = elem.get_attribute("aria-label")
+                                    if aria: text_content += " " + aria
+                                    
+                                    # Look for M:SS pattern
+                                    dur_match = re.search(r'(\d+:\d+)', text_content)
+                                    if dur_match: 
+                                        duration_text = dur_match.group(1)
+                                        print(f"  Got Duration: {duration_text}")
                                 except: pass
                                 
                                 results.append({
@@ -1239,13 +1295,35 @@ class VideoDownloaderApp(ctk.CTk):
                      success_count += 1
                      if item.get('id'): self.add_to_history(item.get('id')) 
                  else:
-                     fail_msg = found_error if found_error else "❌ Lỗi tải"
-                     update_status(fail_msg, "red")
+                     # Translate Error
+                     fail_msg = found_error if found_error else "Lỗi tải"
+                     viet_msg = fail_msg
+                     
+                     for key, val in ERROR_MAP.items():
+                         if key.lower() in fail_msg.lower():
+                             viet_msg = val
+                             break
+                             
+                     # Display short
+                     display_msg = viet_msg
+                     if len(display_msg) > 20: display_msg = display_msg[:17] + "..."
+                     
+                     # Update with Tooltip
+                     def update_err_gui():
+                         if idx_map and self.video_data_map.get(idx_map):
+                             lbl = self.video_data_map[idx_map].get('status_label')
+                             if lbl:
+                                 lbl.configure(text=display_msg, text_color="red")
+                                 CreateToolTip(lbl, viet_msg) # Add Hover
+                                 
+                     self.gui_queue.put(update_err_gui)
+                     print(f"Fail: {viet_msg}")
 
              except Exception as e:
                  print(f"Exec Error: {e}")
-                 update_status(f"❌ {str(e)}", "red")
-        
+                 err_str = str(e)
+                 if len(err_str) > 25: err_str = err_str[:22] + "..."
+                 update_status(f"❌ {err_str}", "red")
         # Restore Cancel Button
         self.gui_queue.put(lambda: self.btn_cancel.configure(text="Hủy bỏ", command=original_cancel_cmd, fg_color="transparent", hover_color="#e5e7eb"))
         self.gui_queue.put(lambda: self.btn_download.configure(state="normal", text=f"Tải Xuống ({success_count}/{total})")) 
