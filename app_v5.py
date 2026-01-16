@@ -64,28 +64,31 @@ def CreateToolTip(widget, text):
     widget.bind('<Enter>', enter)
     widget.bind('<Leave>', leave)
 
-# Selenium Imports
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from webdriver_manager.chrome import ChromeDriverManager
-    from selenium.webdriver.chrome.service import Service
-    HAS_SELENIUM = True
-except ImportError:
-    HAS_SELENIUM = False
+# Selenium Imports (Lazy Loaded in methods to speed up App Launch)
+# Removed top-level imports
+
 
 class FacebookScanner:
     def __init__(self):
-        if not HAS_SELENIUM:
-            raise ImportError("Selenium not installed")
+        pass # Imports are handled in scan() for speed
             
     def scan(self, url, status_callback=None):
         """
         Scans a Facebook URL. If a root profile is given, scans both /videos and /reels.
         """
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.common.keys import Keys
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.chrome import ChromeDriverManager
+            from selenium.webdriver.chrome.service import Service
+        except ImportError as e:
+            if status_callback: status_callback(f"Lỗi thiếu thư viện: {e}")
+            return []
+
         options = Options()
         options.add_argument("--headless")
         options.add_argument("--disable-gpu")
@@ -128,8 +131,10 @@ class FacebookScanner:
                     try: driver.execute_script("document.body.style.zoom='50%'")
                     except: pass
                     
+                    
                     # Popup Handling
-                    from selenium.webdriver.common.keys import Keys
+                    # Keys imported above
+
                     
                     last_height = driver.execute_script("return document.body.scrollHeight")
                     scroll_count = 0
@@ -401,8 +406,8 @@ class VideoDownloaderApp(ctk.CTk):
         self.var_mp3 = ctk.BooleanVar(value=False)
         self.chk_mp3 = create_option_card(controls_inner, "Chỉ tải âm thanh (MP3)", "Convert video sang file audio", self.var_mp3)
         
-        self.var_thumb = ctk.BooleanVar(value=True)
-        self.chk_thumb = create_option_card(controls_inner, "Tải Thumbnail", "Lưu ảnh bìa chất lượng cao", self.var_thumb, checked=True)
+        self.var_thumb = ctk.BooleanVar(value=False)
+        self.chk_thumb = create_option_card(controls_inner, "Tải Thumbnail", "Lưu ảnh bìa chất lượng cao", self.var_thumb, checked=False)
         
         self.var_cookies = ctk.BooleanVar(value=False)
         self.chk_cookies = create_option_card(controls_inner, "Sử dụng Cookies", "Dùng cho video riêng tư/hạn chế", self.var_cookies)
@@ -736,8 +741,11 @@ class VideoDownloaderApp(ctk.CTk):
             self.gui_queue.put(lambda: self.btn_scan.configure(state="normal", text="Quét & Lấy Danh Sách"))
 
     def _scan_facebook_selenium(self, link):
-        if not HAS_SELENIUM:
-             return False
+        # Lazy check
+        try:
+            import selenium
+        except ImportError:
+            return False
              
         self.gui_queue.put(lambda: self.log_msg("⚠ Đang kích hoạt robot quét sâu (Selenium)..."))
         
