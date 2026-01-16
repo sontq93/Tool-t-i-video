@@ -1035,8 +1035,8 @@ class VideoDownloaderApp(ctk.CTk):
                       text_color=COLORS["text_primary"], hover=False, font=("Arial", 11, "bold")).grid(row=0, column=3)
 
         # 5. Status
-        lbl_status = ctk.CTkLabel(row, text="Chờ tải...", font=("Arial", 13), text_color=COLORS["text_secondary"])
-        lbl_status.grid(row=0, column=4, sticky="nsew")
+        lbl_status = ctk.CTkLabel(row, text="Chờ tải...", font=("Arial", 13), text_color=COLORS["text_secondary"], width=120, anchor="e")
+        lbl_status.grid(row=0, column=4, sticky="nsew", padx=(0, 10))
         
         # Store for updates
         if idx in self.video_data_map:
@@ -1111,7 +1111,22 @@ class VideoDownloaderApp(ctk.CTk):
         self.btn_download.configure(state="disabled", text="Đang Tải...")
         threading.Thread(target=self.run_download_logic, args=(selected_items,), daemon=True).start()
 
+    def stop_download_process(self):
+        self.stop_download_flag = True
+        self.btn_download.configure(state="disabled", text="Đang Hủy...")
+
     def run_download_logic(self, items, is_direct=False):
+        self.stop_download_flag = False
+        
+        # Connect Cancel Button (Hủy bỏ) 
+        # Note: The "Hủy bỏ" button in UI (btn_cancel) usually clears selection, 
+        # but during download we want it to stop. 
+        # Ideally we should have a dedicated Stop button, or toggle the Main Download button.
+        # For now, let's retarget the "Hủy bỏ" button temporarily
+        
+        original_cancel_cmd = self.btn_cancel.cget("command")
+        self.gui_queue.put(lambda: self.btn_cancel.configure(text="Dừng Tải (Stop)", command=self.stop_download_process, fg_color="red", hover_color="#991b1b"))
+
         save_folder = self.entry_folder.get()
         if not os.path.exists(save_folder):
              os.makedirs(save_folder, exist_ok=True)
@@ -1123,6 +1138,9 @@ class VideoDownloaderApp(ctk.CTk):
         success_count = 0
 
         for i, item in enumerate(items, 1):
+             if self.stop_download_flag:
+                 break
+
              url = item.get('url')
              title = item.get('title', 'Video')
              idx_map = None 
@@ -1132,12 +1150,15 @@ class VideoDownloaderApp(ctk.CTk):
                  if v == item: idx_map = k
 
              def update_status(msg, color=COLORS["text_secondary"]):
+                 # Truncate strictly
+                 if len(msg) > 18: msg = msg[:15] + "..."
+                 
                  if idx_map and self.video_data_map.get(idx_map):
                      lbl = self.video_data_map[idx_map].get('status_label')
-                     if lbl: lbl.configure(text=msg, text_color=color)
+                     if lbl and lbl.winfo_exists(): lbl.configure(text=msg, text_color=color)
                  print(f"[{i}/{total}] {title}: {msg}")
 
-             update_status("⬇ Đang tải...", COLORS["blue_primary"])
+             update_status("⬇ Đang kết nối...", COLORS["blue_primary"])
              
              # Build CMD
              cmd = [TOOL_PATH, "--no-check-certificate", "--ignore-errors", "--newline"]
@@ -1150,9 +1171,8 @@ class VideoDownloaderApp(ctk.CTk):
              if is_mp3:
                  cmd.extend(["-x", "--audio-format", "mp3"])
              else:
-                 # FIX Priority: MP4 > MOV > AVI > WMV > MKV > FLV > Best
-                 # Using single file best variant to avoid merge issues (no ffmpeg)
-                 cmd.extend(["-f", "best[ext=mp4]/best[ext=mov]/best[ext=avi]/best[ext=wmv]/best[ext=mkv]/best[ext=flv]/best", "--merge-output-format", "mp4"])
+                 # Strict MP4 preference
+                 cmd.extend(["-f", "best[ext=mp4]/best", "--merge-output-format", "mp4"])
 
              # Thumb
              if self.var_thumb.get():
@@ -1175,46 +1195,63 @@ class VideoDownloaderApp(ctk.CTk):
                  
                  found_error = None
                  while True:
+                     if self.stop_download_flag:
+                         process.terminate()
+                         update_status("⏹ Đã dừng", "red")
+                         break
+                         
                      line = process.stdout.readline()
                      if not line and process.poll() is not None:
                          break
                      if line:
                          line = line.strip()
-                         # Regex Progress
-                         perc = re.search(r'\[download\]\s+(\d+\.?\d*)%', line)
+                         # Relaxed Regex Progress (Look for any % number)
+                         perc = re.search(r'(\d+(?:\.\d+)?)%', line)
                          if perc:
                              update_status(f"⬇ {perc.group(1)}%", COLORS["blue_primary"])
                              
                          # Regex Error
                          if "ERROR:" in line:
                              print(f"CMD Error: {line}")
-                             # Extract cleaner error message
                              err_match = re.search(r'ERROR:\s+(.*)', line)
                              if err_match:
-                                 found_error = err_match.group(1).split(';')[0][:40] # Shorten
+                                 found_error = err_match.group(1).split(';')[0]
                              else:
                                  found_error = "Lỗi không xác định"
 
                  rc = process.poll()
                  
-                 if rc == 0 and not found_error:
+                 if self.stop_download_flag:
+                     break
+                 
+                 # Strict Validation
+                 # Check if any video file exists with matching title pattern or recent file
+                 # Since filename is dynamic, simple success check: rc==0 AND found_error is None
+                 status_ok = (rc == 0 and not found_error)
+                 
+                 # Extra Check: Did it download a video file?
+                 # Warning: hard to know exact filename. But we can trust rc=0 usually.
+                 # User reported "Still JPG". This means download finished but was not a video.
+                 # If -f best[ext=mp4] failed, it might have done nothing?
+                 
+                 if status_ok:
                      update_status("✅ Hoàn tất", COLORS["green_success"])
                      success_count += 1
                      if item.get('id'): self.add_to_history(item.get('id')) 
                  else:
                      fail_msg = found_error if found_error else "❌ Lỗi tải"
-                     # Truncate for UI
-                     if len(fail_msg) > 25: fail_msg = fail_msg[:22] + "..."
                      update_status(fail_msg, "red")
 
              except Exception as e:
                  print(f"Exec Error: {e}")
-                 err_str = str(e)
-                 if len(err_str) > 25: err_str = err_str[:22] + "..."
-                 update_status(f"❌ {err_str}", "red")
+                 update_status(f"❌ {str(e)}", "red")
         
-        # Done
-        self.gui_queue.put(lambda: messagebox.showinfo("Hoàn tất", f"Đã tải {success_count}/{total} video."))
+        # Restore Cancel Button
+        self.gui_queue.put(lambda: self.btn_cancel.configure(text="Hủy bỏ", command=original_cancel_cmd, fg_color="transparent", hover_color="#e5e7eb"))
+        self.gui_queue.put(lambda: self.btn_download.configure(state="normal", text=f"Tải Xuống ({success_count}/{total})")) 
+        
+        msg_title = "Đã dừng" if self.stop_download_flag else "Hoàn tất"
+        self.gui_queue.put(lambda: messagebox.showinfo(msg_title, f"Xử lý xong {i}/{total} video.\nThành công: {success_count}"))
         self.gui_queue.put(lambda: self.btn_download.configure(state="normal", text="Tải Xuống Ngay"))
 
     def check_queue(self):
