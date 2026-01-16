@@ -1125,7 +1125,7 @@ class VideoDownloaderApp(ctk.CTk):
              update_status("⬇ Đang tải...", COLORS["blue_primary"])
              
              # Build CMD
-             cmd = [TOOL_PATH, "--no-check-certificate", "--ignore-errors"]
+             cmd = [TOOL_PATH, "--no-check-certificate", "--ignore-errors", "--newline"]
              
              # Name template
              out_tmpl = os.path.join(save_folder, "%(title)s.%(ext)s")
