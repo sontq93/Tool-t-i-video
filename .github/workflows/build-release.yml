@@ -13,9 +13,9 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        os: [macos-13, windows-latest] # Upgraded to macos-13 (Intel) for better stability/performance.
+        os: [macos-15-intel, windows-latest] # Upgraded to macos-15-intel for continued legacy support.
         include:
-          - os: macos-13
+          - os: macos-15-intel
             artifact_name: VideoDownloaderProV6.app
             zip_name: VideoDownloaderProV6_macOS.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
@@ -46,11 +46,11 @@ jobs:
         shell: bash
 
       - name: Make yt-dlp executable (macOS only)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         run: chmod +x yt-dlp
 
       - name: Build with PyInstaller (macOS)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         run: |
           pyinstaller --noconfirm --onefile --windowed \
             --name "VideoDownloaderProV6" \
@@ -67,17 +67,17 @@ jobs:
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         run: xattr -cr dist/VideoDownloaderProV6.app
 
       - name: Zip macOS app
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         run: |
           cd dist
           zip -r VideoDownloaderProV6_macOS.zip VideoDownloaderProV6.app
 
       - name: Upload artifact (macOS)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         uses: actions/upload-artifact@v4
         with:
           name: VideoDownloaderProV6_macOS
