@@ -72,9 +72,11 @@ class FacebookScanner:
     def __init__(self):
         pass # Imports are handled in scan() for speed
             
-    def scan(self, url, status_callback=None):
+    def scan(self, url, status_callback=None, on_video_found=None, progress_callback=None):
         """
-        Scans a Facebook URL. If a root profile is given, scans both /videos and /reels.
+        Scans a Facebook URL. 
+        on_video_found(video_dict): Called immediately when a video is found.
+        progress_callback(percent): Called to update progress.
         """
         try:
             from selenium import webdriver
@@ -142,7 +144,11 @@ class FacebookScanner:
                     retry_scrolls = 0
                     
 
+                    import time
                     while scroll_count < max_scrolls:
+                        percent = int((scroll_count / max_scrolls) * 100)
+                        if progress_callback: progress_callback(percent)
+                        
                         if status_callback: status_callback(f"Quét {tab_name}: Cuộn {scroll_count}...")
                         
                         try: driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
@@ -177,11 +183,15 @@ class FacebookScanner:
                                             if dur_match: duration_text = dur_match.group(1)
                                         except: pass
                                         
-                                        results.append({
+                                        video_item = {
                                             'url': clean_link,
                                             'thumbnail': thumb_url,
                                             'duration': duration_text 
-                                        })
+                                        }
+                                        results.append(video_item)
+                                        
+                                        if on_video_found:
+                                             on_video_found(video_item)
                             except: pass
                         
                         # Check progress
@@ -201,8 +211,6 @@ class FacebookScanner:
                             
                         last_height = new_height
                         scroll_count += 1
-                        last_height = new_height
-                        scroll_count += 1
                         
                 except Exception as sub_e:
                     print(f"Error scanning tab {target_url}: {sub_e}")
@@ -212,6 +220,8 @@ class FacebookScanner:
                      next_tab = "Reels" if "reels" in targets[idx+1] else "Videos"
                      if status_callback: status_callback(f"✅ Xong {tab_name}. Đang chuyển sang {next_tab}...")
                      time.sleep(2)
+            
+            if progress_callback: progress_callback(100)
                     
             if status_callback: status_callback(f"Đã quét xong! Tổng: {len(results)} video.")
                 
@@ -447,11 +457,7 @@ class VideoDownloaderApp(ctk.CTk):
                                       font=("Arial", 15, "bold"), command=self.start_scan_thread)
         self.btn_scan.pack(fill="x", pady=(0, 12))
         
-        # Scan Progress Bar
-        self.scan_prog = ctk.CTkProgressBar(actions_inner, height=10, corner_radius=5)
-        self.scan_prog.set(0)
-        self.scan_prog.pack(fill="x", pady=(0, 12))
-        self.scan_prog.pack_forget() # Hide initially
+        # Removed Scan Progress Bar as per user request (Button will show %)
 
         self.btn_fast_dl = ctk.CTkButton(actions_inner, text="Tải Nhanh (Bỏ qua list)", 
                                          height=48, corner_radius=12,
@@ -697,11 +703,7 @@ class VideoDownloaderApp(ctk.CTk):
             messagebox.showinfo("Nhắc nhở", "Vui lòng nhập link video hoặc kênh.")
             return
 
-        self.btn_scan.configure(state="disabled", text="⏳ Đang quét...")
-        self.scan_prog.pack(fill="x", pady=(0, 12)) # Show bar
-        self.scan_prog.set(0)
-        self.scan_prog.configure(mode="indeterminate")
-        self.scan_prog.start()
+        self.btn_scan.configure(state="disabled", text="⏳ Đang quét... 0%")
         
         # Clear existing
         for widget in self.scroll_frame.winfo_children():
@@ -765,37 +767,38 @@ class VideoDownloaderApp(ctk.CTk):
         def status_cb(msg):
              self.gui_queue.put(lambda: self.log_msg(msg))
              print(msg)
+        
+        def on_video(v_item):
+             # Add single video immediately
+             v_url = v_item['url']
+             v_thumb = v_item['thumbnail']
+             v_dur = v_item['duration']
              
+             entry = {
+                 'id': v_url,
+                 'title': f"Facebook Video {v_url[-15:]}...", 
+                 'url': v_url,
+                 'webpage_url': v_url,
+                 'thumbnail': v_thumb,
+                 'duration': None,
+                 'duration_string': v_dur,
+                 'resolution': 'Unknown'
+             }
+             # Process list of 1
+             self.process_entries([entry], link)
+             # Auto select this one
+             self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
+             
+        def on_progress(percent):
+             self.gui_queue.put(lambda: self.btn_scan.configure(text=f"⏳ Đang quét... {percent}%"))
+
         try:
-            video_urls = scanner.scan(link, status_cb)
+            # We don't need return value anymore as we stream results
+            scanner.scan(link, status_callback=status_cb, on_video_found=on_video, progress_callback=on_progress)
+            return True
         except Exception as e:
             print(f"Selenium Error: {e}")
             return False
-            
-        if not video_urls:
-             return False
-
-        entries = []
-        for v_item in video_urls:
-            v_url = v_item['url']
-            v_thumb = v_item['thumbnail']
-            v_dur = v_item['duration']
-            
-            entries.append({
-                'id': v_url,
-                'title': f"Facebook Video {v_url[-15:]}...", 
-                'url': v_url,
-                'webpage_url': v_url,
-                'thumbnail': v_thumb,
-                'duration': None, # Raw seconds
-                'duration_string': v_dur, # Display string
-                'resolution': 'Unknown'
-            })
-            
-        self.process_entries(entries, link)
-        # Auto Select All
-        self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
-        return True
 
     def scan_standard(self, link):
         # List of candidate URLs to try
