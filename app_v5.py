@@ -446,6 +446,12 @@ class VideoDownloaderApp(ctk.CTk):
                                       fg_color=COLORS["blue_primary"], hover_color=COLORS["blue_hover"],
                                       font=("Arial", 15, "bold"), command=self.start_scan_thread)
         self.btn_scan.pack(fill="x", pady=(0, 12))
+        
+        # Scan Progress Bar
+        self.scan_prog = ctk.CTkProgressBar(actions_inner, height=10, corner_radius=5)
+        self.scan_prog.set(0)
+        self.scan_prog.pack(fill="x", pady=(0, 12))
+        self.scan_prog.pack_forget() # Hide initially
 
         self.btn_fast_dl = ctk.CTkButton(actions_inner, text="Tải Nhanh (Bỏ qua list)", 
                                          height=48, corner_radius=12,
@@ -692,6 +698,10 @@ class VideoDownloaderApp(ctk.CTk):
             return
 
         self.btn_scan.configure(state="disabled", text="⏳ Đang quét...")
+        self.scan_prog.pack(fill="x", pady=(0, 12)) # Show bar
+        self.scan_prog.set(0)
+        self.scan_prog.configure(mode="indeterminate")
+        self.scan_prog.start()
         
         # Clear existing
         for widget in self.scroll_frame.winfo_children():
@@ -739,6 +749,7 @@ class VideoDownloaderApp(ctk.CTk):
             self.gui_queue.put(lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
         finally:
             self.gui_queue.put(lambda: self.btn_scan.configure(state="normal", text="Quét & Lấy Danh Sách"))
+            self.gui_queue.put(lambda: self.scan_prog.stop() or self.scan_prog.pack_forget())
 
     def _scan_facebook_selenium(self, link):
         # Lazy check
@@ -1123,11 +1134,17 @@ class VideoDownloaderApp(ctk.CTk):
 
         # 5. Status
         lbl_status = ctk.CTkLabel(row, text="Chờ tải...", font=("Arial", 13), text_color=COLORS["text_secondary"], width=120, anchor="e")
-        lbl_status.grid(row=0, column=4, sticky="nsew", padx=(0, 10))
+        lbl_status.grid(row=0, column=4, sticky="n", padx=(0, 10), pady=(5,0))
+        
+        # Download Progress Bar
+        prog_bar = ctk.CTkProgressBar(row,  width=100, height=6, corner_radius=3)
+        prog_bar.set(0)
+        prog_bar.grid(row=0, column=4, sticky="s", padx=(0, 10), pady=(0, 8))
         
         # Store for updates
         if idx in self.video_data_map:
              self.video_data_map[idx]['status_label'] = lbl_status
+             self.video_data_map[idx]['prog_bar'] = prog_bar
         
         # Hover Effect
         def on_enter(e): 
@@ -1245,7 +1262,13 @@ class VideoDownloaderApp(ctk.CTk):
                      if lbl and lbl.winfo_exists(): lbl.configure(text=msg, text_color=color)
                  print(f"[{i}/{total}] {title}: {msg}")
 
+             def update_prog(val):
+                 if idx_map and self.video_data_map.get(idx_map):
+                     bar = self.video_data_map[idx_map].get('prog_bar')
+                     if bar and bar.winfo_exists(): bar.set(val)
+
              update_status("⬇ Đang kết nối...", COLORS["blue_primary"])
+             self.gui_queue.put(lambda: update_prog(0))
              
              # Build CMD
              cmd = [TOOL_PATH, "--no-check-certificate", "--ignore-errors", "--newline"]
@@ -1296,6 +1319,10 @@ class VideoDownloaderApp(ctk.CTk):
                          perc = re.search(r'(\d+(?:\.\d+)?)%', line)
                          if perc:
                              update_status(f"⬇ {perc.group(1)}%", COLORS["blue_primary"])
+                             try:
+                                 val = float(perc.group(1)) / 100
+                                 self.gui_queue.put(lambda v=val: update_prog(v))
+                             except: pass
                              
                          # Regex Error
                          if "ERROR:" in line:
