@@ -14,6 +14,100 @@ import re
 import urllib.request
 import ssl
 
+# Selenium Imports
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.chrome.service import Service
+    HAS_SELENIUM = True
+except ImportError:
+    HAS_SELENIUM = False
+
+class FacebookScanner:
+    def __init__(self):
+        if not HAS_SELENIUM:
+            raise ImportError("Selenium not installed")
+            
+    def scan(self, url, status_callback=None):
+        """
+        Scans a Facebook URL using Selenium to get video links.
+        Returns a list of unique video URLs.
+        """
+        options = Options()
+        options.add_argument("--headless") # Invisible mode
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-notifications")
+        options.add_argument("--mute-audio")
+        # Randomize UA
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        driver = None
+        unique_links = set()
+        
+        try:
+            if status_callback: status_callback("Đang khởi động Robot quét...")
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+            
+            if status_callback: status_callback(f"Đang truy cập: {url}")
+            driver.get(url)
+            
+            # Close popup if exists (Login popup)
+            video_links = set()
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            scroll_count = 0
+            max_scrolls = 50 # Limit to prevent infinite loops (adjust as needed)
+            
+            import time
+            while scroll_count < max_scrolls:
+                if status_callback: status_callback(f"Đang cuộn trang ({scroll_count}/{max_scrolls})...")
+                
+                # Scroll down
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3) # Wait for load (Facebook is slow)
+                
+                # Extract Links
+                elements = driver.find_elements(By.TAG_NAME, "a")
+                for elem in elements:
+                    try:
+                        href = elem.get_attribute("href")
+                        if href:
+                            # Filter relevant video links
+                            if any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
+                                # Clean URL (Facebook adds a lot of tracking params)
+                                clean_url = href.split("?")[0]
+                                if clean_url not in unique_links:
+                                    unique_links.add(clean_url)
+                                    print(f"Found FB Link: {clean_url}")
+                    except: pass
+                
+                # Check scroll height
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    # Try one more wait
+                    time.sleep(2)
+                    new_height = driver.execute_script("return document.body.scrollHeight")
+                    if new_height == last_height:
+                        break # End of page
+                last_height = new_height
+                scroll_count += 1
+            
+            if status_callback: status_callback(f"Đã quét xong! Tìm thấy {len(unique_links)} video.")
+                
+        except Exception as e:
+            print(f"Selenium Scan Error: {e}")
+            if status_callback: status_callback(f"Lỗi quét Robot: {e}")
+        finally:
+            if driver: driver.quit()
+            
+        return list(unique_links)
+
+
 # --- CONSTANTS & CONFIG ---
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
@@ -509,6 +603,9 @@ class VideoDownloaderApp(ctk.CTk):
                     base_link = link.rstrip("/")
                     link = base_link + "/videos"
                     print(f"DEBUG: Auto-converted to video tab: {link}")
+                    
+                    # Update UI to reflect change
+                    self.gui_queue.put(lambda: self.entry_link.delete(0, 'end') or self.entry_link.insert(0, link))
             
             # 1. Check Channel vs Video
             is_youtube_channel = ("youtube.com" in link) and ("youtu.be" not in link)
@@ -526,6 +623,41 @@ class VideoDownloaderApp(ctk.CTk):
             self.gui_queue.put(lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
         finally:
             self.gui_queue.put(lambda: self.btn_scan.configure(state="normal", text="Quét & Lấy Danh Sách"))
+
+    def _scan_facebook_selenium(self, link):
+        if not HAS_SELENIUM:
+             return False
+             
+        self.gui_queue.put(lambda: self.log_msg("⚠ Đang kích hoạt robot quét sâu (Selenium)..."))
+        
+        scanner = FacebookScanner()
+        
+        def status_cb(msg):
+             self.gui_queue.put(lambda: self.log_msg(msg))
+             print(msg)
+             
+        try:
+            video_urls = scanner.scan(link, status_cb)
+        except Exception as e:
+            print(f"Selenium Error: {e}")
+            return False
+            
+        if not video_urls:
+             return False
+
+        entries = []
+        for v_url in video_urls:
+            entries.append({
+                'id': v_url,
+                'title': f"Facebook Video {v_url[-15:]}...", 
+                'url': v_url,
+                'webpage_url': v_url,
+                'duration': None,
+                'resolution': 'Unknown'
+            })
+            
+        self.process_entries(entries, link)
+        return True
 
     def scan_standard(self, link):
         # List of candidate URLs to try
@@ -586,7 +718,13 @@ class VideoDownloaderApp(ctk.CTk):
                 success = True
                 break
 
-        if not success and not self.stop_flag: # Only show error if all retries failed
+        if not success and not self.stop_flag: 
+             # Try Selenium Fallback for Facebook
+             if ("facebook.com" in link or "fb.watch" in link) and HAS_SELENIUM:
+                 if self._scan_facebook_selenium(link):
+                     return # Success with Selenium
+
+             # Only show error if all retries failed
              self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", f"Không tìm thấy video từ link này.\nĐã thử {len(candidates)} kiểu link khác nhau nhưng đều thất bại.\n\nGợi ý: Thử link của từng video lẻ thay vì link danh sách."))
 
     def _try_scan(self, link):
@@ -594,8 +732,8 @@ class VideoDownloaderApp(ctk.CTk):
         
         # UA Fix - Use Desktop UA for Facebook to match Cookies better
         if "facebook.com" in link or "fb.watch" in link:
-             # cmd.extend(["--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)..."]) # Old Mobile UA
-             cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"])
+             # Use Standard Windows 10 Chrome UA - safest for most cookies
+             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"])
         else:
              cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
         
