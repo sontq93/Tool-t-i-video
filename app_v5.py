@@ -75,34 +75,44 @@ class FacebookScanner:
                     driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
                 except: pass
 
-                # Scroll down
+                # Scroll down with wiggle
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3) # Increased wait
+                time.sleep(1)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 700);")
+                time.sleep(1)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3) # Wait for load
                 
                 # Extract Links AND Metadata
                 elements = driver.find_elements(By.TAG_NAME, "a")
                 for elem in elements:
                     try:
                         href = elem.get_attribute("href")
-                        if href:
-                            if any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
-                                clean_url = href.split("?")[0]
-                                if clean_url not in unique_links:
-                                    unique_links.add(clean_url)
+                        if href and any(x in href for x in ["/videos/", "/reel/", "/watch/", "video.php"]):
+                            clean_url = href.split("?")[0]
+                            if clean_url not in unique_links:
+                                unique_links.add(clean_url)
+                                
+                                # Thumbnail & Duration
+                                thumb_url = None
+                                duration_text = None
+                                try:
+                                    # Thumb
+                                    imgs = elem.find_elements(By.TAG_NAME, "img")
+                                    if imgs: thumb_url = imgs[0].get_attribute("src")
                                     
-                                    # Thumbnail
-                                    thumb_url = None
-                                    try:
-                                        imgs = elem.find_elements(By.TAG_NAME, "img")
-                                        if imgs: thumb_url = imgs[0].get_attribute("src")
-                                    except: pass
-                                    
-                                    print(f"Found FB Link: {clean_url}")
-                                    results.append({
-                                        'url': clean_url,
-                                        'thumbnail': thumb_url,
-                                        'duration': None 
-                                    })
+                                    # Duration (Regex search in element text)
+                                    text = elem.text or elem.get_attribute("innerText")
+                                    if text:
+                                        dur_match = re.search(r'(\d+:\d+)', text)
+                                        if dur_match: duration_text = dur_match.group(1)
+                                except: pass
+                                
+                                results.append({
+                                    'url': clean_url,
+                                    'thumbnail': thumb_url,
+                                    'duration': duration_text 
+                                })
                     except: pass
                 
                 # Check scroll height
@@ -671,6 +681,7 @@ class VideoDownloaderApp(ctk.CTk):
         for v_item in video_urls:
             v_url = v_item['url']
             v_thumb = v_item['thumbnail']
+            v_dur = v_item['duration']
             
             entries.append({
                 'id': v_url,
@@ -678,11 +689,14 @@ class VideoDownloaderApp(ctk.CTk):
                 'url': v_url,
                 'webpage_url': v_url,
                 'thumbnail': v_thumb,
-                'duration': None,
+                'duration': None, # Raw seconds
+                'duration_string': v_dur, # Display string
                 'resolution': 'Unknown'
             })
             
         self.process_entries(entries, link)
+        # Auto Select All
+        self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
         return True
 
     def scan_standard(self, link):
@@ -838,6 +852,7 @@ class VideoDownloaderApp(ctk.CTk):
              self.scan_standard(link)
         else:
              self.process_entries(entries, link)
+        self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
 
     def format_duration(self, seconds):
         if not seconds: return "N/A"
@@ -1188,11 +1203,15 @@ class VideoDownloaderApp(ctk.CTk):
                      if item.get('id'): self.add_to_history(item.get('id')) 
                  else:
                      fail_msg = found_error if found_error else "❌ Lỗi tải"
+                     # Truncate for UI
+                     if len(fail_msg) > 25: fail_msg = fail_msg[:22] + "..."
                      update_status(fail_msg, "red")
 
              except Exception as e:
                  print(f"Exec Error: {e}")
-                 update_status(f"❌ Lỗi: {str(e)[:20]}", "red")
+                 err_str = str(e)
+                 if len(err_str) > 25: err_str = err_str[:22] + "..."
+                 update_status(f"❌ {err_str}", "red")
         
         # Done
         self.gui_queue.put(lambda: messagebox.showinfo("Hoàn tất", f"Đã tải {success_count}/{total} video."))
