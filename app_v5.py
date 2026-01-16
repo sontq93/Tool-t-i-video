@@ -700,10 +700,10 @@ class VideoDownloaderApp(ctk.CTk):
         
         self.video_data_map.clear()
         
-        # Facebook Cookie Warning
+        # Facebook Cookie Warning (Strict)
         if ("facebook.com" in link or "fb.watch" in link) and not self.var_cookies.get():
-             resp = messagebox.askyesno("Cảnh báo Facebook", "Facebook thường yêu cầu Cookies để quét được đầy đủ danh sách video.\n\nBạn chưa chọn 'Sử dụng Cookies'.\nBạn có chắc chắn muốn tiếp tục không?\n(Chọn 'No' để quay lại thêm Cookies)")
-             if not resp: return
+             messagebox.showwarning("Yêu cầu Cookies", "⚠ Phát hiện link Facebook!\n\nFacebook yêu cầu bắt buộc phải có Cookies để quét được đầy đủ Video/Reels và tránh bị chặn.\n\nVui lòng tích vào ô 'Sử dụng Cookies' (góc trái) và chọn trình duyệt hoặc file cookies để tiếp tục.")
+             return
 
         threading.Thread(target=self.run_scan_logic, args=(link,), daemon=True).start()
 
