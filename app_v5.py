@@ -12,6 +12,7 @@ import json
 import platform
 import re
 import urllib.request
+import ssl
 
 # --- CONSTANTS & CONFIG ---
 ctk.set_appearance_mode("Light")
