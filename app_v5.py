@@ -136,7 +136,7 @@ class FacebookScanner:
                     max_scrolls = 100 
                     retry_scrolls = 0
                     
-                    import time
+
                     while scroll_count < max_scrolls:
                         if status_callback: status_callback(f"Quét {tab_name}: Cuộn {scroll_count}...")
                         
