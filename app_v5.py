@@ -1150,17 +1150,45 @@ class VideoDownloaderApp(ctk.CTk):
 
              cmd.extend(["--no-part", url])
              
-             # Run
-             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-             stdout, stderr = process.communicate()
-             
-             if process.returncode == 0:
-                 update_status("✅ Hoàn tất", COLORS["green_success"])
-                 success_count += 1
-                 if item.get('id'): self.add_to_history(item.get('id')) # Add to history
+             # Run & Parse Output Realtime
+             try:
+                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+                 
+                 found_error = None
+                 while True:
+                     line = process.stdout.readline()
+                     if not line and process.poll() is not None:
+                         break
+                     if line:
+                         line = line.strip()
+                         # Regex Progress
+                         perc = re.search(r'\[download\]\s+(\d+\.?\d*)%', line)
+                         if perc:
+                             update_status(f"⬇ {perc.group(1)}%", COLORS["blue_primary"])
+                             
+                         # Regex Error
+                         if "ERROR:" in line:
+                             print(f"CMD Error: {line}")
+                             # Extract cleaner error message
+                             err_match = re.search(r'ERROR:\s+(.*)', line)
+                             if err_match:
+                                 found_error = err_match.group(1).split(';')[0][:40] # Shorten
+                             else:
+                                 found_error = "Lỗi không xác định"
 
-             else:
-                 update_status("❌ Lỗi", COLORS["border"]) # Redish?
+                 rc = process.poll()
+                 
+                 if rc == 0 and not found_error:
+                     update_status("✅ Hoàn tất", COLORS["green_success"])
+                     success_count += 1
+                     if item.get('id'): self.add_to_history(item.get('id')) 
+                 else:
+                     fail_msg = found_error if found_error else "❌ Lỗi tải"
+                     update_status(fail_msg, "red")
+
+             except Exception as e:
+                 print(f"Exec Error: {e}")
+                 update_status(f"❌ Lỗi: {str(e)[:20]}", "red")
         
         # Done
         self.gui_queue.put(lambda: messagebox.showinfo("Hoàn tất", f"Đã tải {success_count}/{total} video."))
