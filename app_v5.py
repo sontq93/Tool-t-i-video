@@ -127,7 +127,7 @@ class FacebookScanner:
                 
                 try:
                     driver.get(target_url)
-                    time.sleep(3)
+                    time.sleep(1.5)
                     
                     # Zoom out
                     try: driver.execute_script("document.body.style.zoom='50%'")
@@ -155,8 +155,8 @@ class FacebookScanner:
                         except: pass
 
                         # Scroll
-                        driver.execute_script("window.scrollBy(0, 1500);")
-                        time.sleep(1)
+                        driver.execute_script("window.scrollBy(0, 3000);")
+                        time.sleep(0.5)
                         
                         # Extract
                         elements = driver.find_elements(By.TAG_NAME, "a")
@@ -197,15 +197,15 @@ class FacebookScanner:
                         # Check progress
                         new_height = driver.execute_script("return document.body.scrollHeight")
                         
-                        if scroll_count % 5 == 0:
+                        if scroll_count % 10 == 0:
                              driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                             time.sleep(2)
+                             time.sleep(1)
 
                         if new_height == last_height:
                             retry_scrolls += 1
                             if status_callback: status_callback(f"Đang tìm thêm {tab_name} ({retry_scrolls}/5)...")
                             if retry_scrolls >= 5: break 
-                            time.sleep(2)
+                            time.sleep(1)
                         else:
                             retry_scrolls = 0
                             
@@ -219,7 +219,7 @@ class FacebookScanner:
                 if idx < len(targets) - 1:
                      next_tab = "Reels" if "reels" in targets[idx+1] else "Videos"
                      if status_callback: status_callback(f"✅ Xong {tab_name}. Đang chuyển sang {next_tab}...")
-                     time.sleep(2)
+                     time.sleep(1)
             
             if progress_callback: progress_callback(100)
                     
@@ -266,6 +266,14 @@ else:
 tool_name = "yt-dlp.exe" if platform.system() == "Windows" else "yt-dlp"
 TOOL_PATH = os.path.join(base_path, tool_name)
 SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+
+def check_ffmpeg():
+    # Check local first
+    local_ffmpeg = os.path.join(base_path, "ffmpeg.exe" if platform.system()=="Windows" else "ffmpeg")
+    if os.path.exists(local_ffmpeg): return True
+    
+    from shutil import which
+    return which('ffmpeg') is not None
 
 class VideoDownloaderApp(ctk.CTk):
     def __init__(self):
@@ -381,6 +389,18 @@ class VideoDownloaderApp(ctk.CTk):
         
         # --- SEPARATOR ---
         ctk.CTkFrame(controls_inner, height=1, fg_color=COLORS["border"]).pack(fill="x", pady=(0, 20))
+
+        # --- VIDEO QUALITY ---
+        ctk.CTkLabel(controls_inner, text="Chất lượng Video (Tối đa)", 
+                     font=("Arial", 13, "bold"), text_color=COLORS["text_primary"]).pack(anchor="w", pady=(0, 8))
+        
+        self.quality_var = ctk.StringVar(value="Best (Tốt nhất)")
+        self.combo_quality = ctk.CTkComboBox(controls_inner, 
+                                             values=["Best (Tốt nhất)", "4K (2160p)", "2K (1440p)", "Full HD (1080p)", "HD (720p)", "SD (480p)"],
+                                             variable=self.quality_var,
+                                             height=32, border_color=COLORS["border"], fg_color=COLORS["bg_main"], text_color=COLORS["text_primary"],
+                                             command=self.on_quality_change)
+        self.combo_quality.pack(fill="x", pady=(0, 20))
 
         # --- OPTIONS (CARDS) ---
         ctk.CTkLabel(controls_inner, text="Tùy chọn tải về", 
@@ -519,7 +539,7 @@ class VideoDownloaderApp(ctk.CTk):
         header_row.grid_columnconfigure(0, weight=0, minsize=50) # Checkbox
         header_row.grid_columnconfigure(1, weight=1)             # Name (Flexible)
         header_row.grid_columnconfigure(2, weight=0, minsize=100) # Duration
-        header_row.grid_columnconfigure(3, weight=0, minsize=80)  # Quality
+        header_row.grid_columnconfigure(3, weight=0, minsize=120)  # Quality (Widened)
         header_row.grid_columnconfigure(4, weight=0, minsize=120) # Status
 
         # Header Columns
@@ -913,47 +933,52 @@ class VideoDownloaderApp(ctk.CTk):
              return False
 
     def scan_youtube_channel(self, link):
-        # 1. Videos
-        link_videos = link.rstrip("/") + "/videos"
-        cmd_v = [TOOL_PATH, "--flat-playlist", "--dump-single-json", "--no-check-certificate", "--ignore-errors", link_videos]
-        # Standard UA
-        cmd_v.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
+        targets = []
         
-        proc_v = subprocess.Popen(cmd_v, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-        out_v, _ = proc_v.communicate()
-
-        # 2. Shorts
-        link_shorts = link.rstrip("/") + "/shorts"
-        cmd_s = cmd_v.copy()
-        cmd_s[-2] = link_shorts # Replace link
-        
-        proc_s = subprocess.Popen(cmd_s, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-        out_s, _ = proc_s.communicate()
+        # Determine intent based on URL
+        if "/shorts" in link:
+            # User wants shorts specifically
+            targets.append(("Shorts", link))
+        elif "/videos" in link:
+            # User wants videos specifically
+            targets.append(("Videos", link))
+        else:
+            # Generic Channel URL -> Scan BOTH
+            base = link.rstrip("/")
+            targets.append(("Videos", base + "/videos"))
+            targets.append(("Shorts", base + "/shorts"))
 
         entries = []
-        # Parse V
-        try:
-            if out_v.strip():
-                d = json.loads(out_v)
-                if 'entries' in d: entries.extend(d['entries'])
-        except: pass
         
-        # Parse S
-        try:
-            if out_s.strip():
-                d = json.loads(out_s)
-                if 'entries' in d: 
-                    shorts = d['entries']
-                    for s in shorts: s['_is_short'] = True
-                    entries.extend(shorts)
-        except: pass
+        for ui_name, t_url in targets:
+            self.gui_queue.put(lambda: self.log_msg(f"Đang quét mục: {ui_name}..."))
+            
+            cmd = [TOOL_PATH, "--flat-playlist", "--dump-single-json", "--playlist-end", "50", "--no-check-certificate", "--ignore-errors", t_url]
+            # Custom UA & Anti-Block
+            cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"])
+            cmd.extend(["--extractor-args", "youtube:player_client=android"])
+
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+                stdout, _ = proc.communicate()
+                
+                if stdout.strip():
+                    d = json.loads(stdout)
+                    if 'entries' in d:
+                        chunk = d['entries']
+                        # Tags for Shorts
+                        if ui_name == "Shorts":
+                            for s in chunk: s['_is_short'] = True
+                        entries.extend(chunk)
+            except Exception as e:
+                print(f"Error scanning {ui_name}: {e}")
 
         if not entries:
-             # Fallback to standard
+             # Fallback to standard if smart scan failed
              self.scan_standard(link)
         else:
              self.process_entries(entries, link)
-        self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
+             self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
 
     def format_duration(self, seconds):
         if not seconds: return "N/A"
@@ -1016,7 +1041,9 @@ class VideoDownloaderApp(ctk.CTk):
                     "is_downloaded": is_downloaded
                 }
 
-                self.add_video_item(idx, display_title, vid_id, duration, "Best", thumb_url, is_downloaded)
+                # Use current quality selection for display
+                current_quality = self.quality_var.get() if hasattr(self, 'quality_var') else "Best"
+                self.add_video_item(idx, display_title, vid_id, duration, current_quality, thumb_url, is_downloaded)
 
         
         self.gui_queue.put(update_ui)
@@ -1087,7 +1114,7 @@ class VideoDownloaderApp(ctk.CTk):
         row.grid_columnconfigure(0, weight=0, minsize=50) # Checkbox
         row.grid_columnconfigure(1, weight=1)             # Name (Flexible)
         row.grid_columnconfigure(2, weight=0, minsize=100) # Duration
-        row.grid_columnconfigure(3, weight=0, minsize=80)  # Quality
+        row.grid_columnconfigure(3, weight=0, minsize=120)  # Quality (Widened)
         row.grid_columnconfigure(4, weight=0, minsize=120) # Status
 
         # 1. Checkbox
@@ -1132,8 +1159,12 @@ class VideoDownloaderApp(ctk.CTk):
         ctk.CTkLabel(row, text=str(duration), font=("Arial", 13), text_color=COLORS["text_secondary"]).grid(row=0, column=2, sticky="nsew")
 
         # 4. Quality
-        ctk.CTkButton(row, text=quality, width=60, height=24, fg_color=COLORS["bg_main"], 
-                      text_color=COLORS["text_primary"], hover=False, font=("Arial", 11, "bold")).grid(row=0, column=3)
+        btn_qual = ctk.CTkButton(row, text=quality, width=100, height=24, fg_color=COLORS["bg_main"], 
+                      text_color=COLORS["text_primary"], hover=False, font=("Arial", 11, "bold"))
+        btn_qual.grid(row=0, column=3)
+        
+        if idx in self.video_data_map:
+             self.video_data_map[idx]['quality_btn'] = btn_qual
 
         # 5. Status
         lbl_status = ctk.CTkLabel(row, text="Chờ tải...", font=("Arial", 13), text_color=COLORS["text_secondary"], width=120, anchor="e")
@@ -1192,6 +1223,13 @@ class VideoDownloaderApp(ctk.CTk):
         # This is now handled by the dynamic command in update_selection_count
         # But we keep it as a fallback entry point if needed, simply calling update to check state
         self.update_selection_count()
+
+    def on_quality_change(self, choice):
+        # Update all list items
+        for data in self.video_data_map.values():
+            btn = data.get('quality_btn')
+            if btn and btn.winfo_exists():
+                btn.configure(text=choice)
 
 
 
@@ -1276,16 +1314,63 @@ class VideoDownloaderApp(ctk.CTk):
              # Build CMD
              cmd = [TOOL_PATH, "--no-check-certificate", "--ignore-errors", "--newline"]
              
+             # ANTI-BLOCK & BYPASS
+             # 1. User Agent
+             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"])
+             
+             # 2. YouTube Specific Bypass (Client Masquerade)
+             if "youtube.com" in url or "youtu.be" in url:
+                  cmd.extend(["--extractor-args", "youtube:player_client=android"])
+
+             
              # Name template
              out_tmpl = os.path.join(save_folder, "%(title)s.%(ext)s")
              cmd.extend(["-o", out_tmpl])
              
              # MP3
              if is_mp3:
+                 if not check_ffmpeg():
+                     update_status("❌ Thiếu FFmpeg", "red")
+                     self.gui_queue.put(lambda: messagebox.showerror("Lỗi thiếu FFmpeg", "Chế độ chuyển đổi MP3 yêu cầu phải cài đặt FFmpeg!\n\nHệ thống sẽ tự động bỏ qua video này."))
+                     continue
                  cmd.extend(["-x", "--audio-format", "mp3"])
              else:
-                 # Strict MP4 preference
-                 cmd.extend(["-f", "best[ext=mp4]/best", "--merge-output-format", "mp4"])
+                 if check_ffmpeg():
+                     # Has FFmpeg: Download best video + best audio and merge to MP4
+                     
+                     # Quality Selection Logic
+                     quality_map = {
+                         "Best (Tốt nhất)": "bestvideo+bestaudio/best",
+                         "4K (2160p)": "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
+                         "2K (1440p)": "bestvideo[height<=1440]+bestaudio/best[height<=1440]",
+                         "Full HD (1080p)": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+                         "HD (720p)": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+                         "SD (480p)": "bestvideo[height<=480]+bestaudio/best[height<=480]"
+                     }
+                     
+                     selected_q = self.quality_var.get()
+                     format_str = quality_map.get(selected_q, "bestvideo+bestaudio/best")
+                     
+                     cmd.extend(["-f", format_str, "--merge-output-format", "mp4"])
+                 else:
+                     # No FFmpeg: Download best SINGLE file (max 720p usually) to avoid merging
+                     # Warn if user wanted high quality
+                     selected_q = self.quality_var.get()
+                     if selected_q not in ["HD (720p)", "SD (480p)", "Best (Tốt nhất)"]:
+                          if i == 1: print("WARN: High quality requested but FFmpeg missing. Falling back to single file.")
+                          
+                     cmd.extend(["-f", "best[ext=mp4]/best"])
+                     if i == 1: # Log once
+                         print("SF check: FFmpeg missing, using single file mode")
+
+             # Inject FFmpeg location if local
+             local_ffmpeg = os.path.join(base_path, "ffmpeg.exe" if platform.system()=="Windows" else "ffmpeg")
+             if os.path.exists(local_ffmpeg):
+                 # yt-dlp expects directory containing ffmpeg, OR full path? 
+                 # Docs say "Location of the ffmpeg binary or the directory containing it"
+                 # Safer to pass directory
+                 cmd.extend(["--ffmpeg-location", base_path])
+
 
              # Thumb
              if self.var_thumb.get():
@@ -1300,7 +1385,10 @@ class VideoDownloaderApp(ctk.CTk):
                  else:
                      cmd.extend(["--cookies-from-browser", source.lower()])
 
-             cmd.extend(["--no-part", url])
+             # STABILITY FIX: Disable multi-threaded downloader to prevent HTTP 416 errors
+             # Removed --no-part, added -N 1
+             cmd.extend(["-N", "1"])
+             cmd.append(url)
              
              # Run & Parse Output Realtime
              try:
@@ -1327,24 +1415,24 @@ class VideoDownloaderApp(ctk.CTk):
                                  self.gui_queue.put(lambda v=val: update_prog(v))
                              except: pass
                              
-                         # Regex Error
-                         if "ERROR:" in line:
+                         # Regex Error - ONLY actual errors, not warnings
+                         if "ERROR:" in line and "WARNING:" not in line:
                              print(f"CMD Error: {line}")
                              err_match = re.search(r'ERROR:\s+(.*)', line)
                              if err_match:
                                  found_error = err_match.group(1).split(';')[0]
                              else:
-                                 found_error = "Lỗi không xác định"
+                                 found_error = line # Capture full line if regex fails
+
 
                  rc = process.poll()
                  
                  if self.stop_download_flag:
                      break
                  
-                 # Strict Validation
-                 # Check if any video file exists with matching title pattern or recent file
-                 # Since filename is dynamic, simple success check: rc==0 AND found_error is None
-                 status_ok = (rc == 0 and not found_error)
+                 # Success Validation: rc=0 means success, ignore warnings
+                 # Only fail if rc != 0 OR there's an actual ERROR (not WARNING)
+                 status_ok = (rc == 0)
                  
                  # Extra Check: Did it download a video file?
                  # Warning: hard to know exact filename. But we can trust rc=0 usually.
