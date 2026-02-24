@@ -72,11 +72,13 @@ class FacebookScanner:
     def __init__(self):
         pass # Imports are handled in scan() for speed
             
-    def scan(self, url, status_callback=None, on_video_found=None, progress_callback=None):
+    def scan(self, url, status_callback=None, on_video_found=None, progress_callback=None, is_cancelled_callback=None, browser_cookie_source=None):
         """
         Scans a Facebook URL. 
         on_video_found(video_dict): Called immediately when a video is found.
         progress_callback(percent): Called to update progress.
+        is_cancelled_callback(): Function returning True if user cancelled the scan.
+        browser_cookie_source(str): Name of the browser to extract cookies from (e.g. 'chrome')
         """
         try:
             from selenium import webdriver
@@ -92,14 +94,50 @@ class FacebookScanner:
             return []
 
         options = Options()
-        options.add_argument("--headless")
+        options.add_argument("--headless=new")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-notifications")
         options.add_argument("--mute-audio")
         options.add_argument("--window-size=1920,1080")
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-        
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+        # Extract cookies from browser using browser_cookie3
+        fb_cookies = []
+        if browser_cookie_source:
+            try:
+                import browser_cookie3
+                source_lower = browser_cookie_source.lower()
+                cookie_fn_map = {
+                    "chrome": browser_cookie3.chrome,
+                    "firefox": browser_cookie3.firefox,
+                    "edge": browser_cookie3.edge,
+                    "opera": browser_cookie3.opera,
+                    "brave": browser_cookie3.brave,
+                    "chromium": browser_cookie3.chromium,
+                    "vivaldi": browser_cookie3.vivaldi,
+                    "safari": getattr(browser_cookie3, 'safari', None),
+                }
+                cookie_fn = cookie_fn_map.get(source_lower)
+                if cookie_fn:
+                    if status_callback: status_callback(f"Đang trích xuất Cookies từ {browser_cookie_source}...")
+                    cj = cookie_fn(domain_name=".facebook.com")
+                    for c in cj:
+                        fb_cookies.append({
+                            "name": c.name,
+                            "value": c.value,
+                            "domain": c.domain,
+                            "path": c.path,
+                            "secure": bool(c.secure),
+                        })
+                    print(f"Extracted {len(fb_cookies)} Facebook cookies from {browser_cookie_source}")
+                else:
+                    print(f"Unsupported browser: {browser_cookie_source}")
+            except Exception as ex:
+                import traceback
+                print(f"Cookie extraction failed: {ex}\n{traceback.format_exc()}")
+                if status_callback: status_callback(f"⚠ Không trích xuất được Cookies từ {browser_cookie_source}: {ex}")
+
         driver = None
         unique_links = set()
         results = []
@@ -110,19 +148,34 @@ class FacebookScanner:
         
         # Heuristic: If URL is just a profile/page (no /videos, /reels, /posts, /watch)
         # We auto-expand to scan BOTH '/videos' and '/reels'
-        if "facebook.com" in clean_input:
-            if not any(x in clean_input for x in ["/videos", "/reels", "/watch", "/posts", "/photo", "/groups"]):
+        if "facebook.com" in url:
+            if not any(x in url for x in ["/videos", "sk=videos", "/reels", "sk=reels", "/watch", "/posts", "/photo", "/groups"]):
                 print("Detected Root URL -> Smart Scan: Videos + Reels")
-                targets = [f"{clean_input}/videos", f"{clean_input}/reels"]
+                if "profile.php?id=" in url:
+                    targets = [url + "&sk=videos", url + "&sk=reels"]
+                else:
+                    targets = [f"{clean_input}/videos", f"{clean_input}/reels"]
         
         try:
             if status_callback: status_callback("Đang khởi động Robot thông minh...")
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
             
+            # Inject cookies into Selenium session
+            if fb_cookies:
+                if status_callback: status_callback(f"Đang nạp {len(fb_cookies)} cookies vào trình duyệt...")
+                driver.get("https://www.facebook.com")
+                time.sleep(1)
+                for cookie in fb_cookies:
+                    try:
+                        driver.add_cookie(cookie)
+                    except Exception:
+                        pass
+                print(f"Injected cookies into Selenium session")
+            
             # Iterate through all targets (e.g. Videos then Reels)
             for idx, target_url in enumerate(targets):
-                tab_name = "Reels" if "/reels" in target_url else "Videos"
+                tab_name = "Reels" if "/reels" in target_url or "sk=reels" in target_url else "Videos"
                 if status_callback: status_callback(f"Đang quét mục {tab_name} ({idx+1}/{len(targets)})...")
                 
                 try:
@@ -135,8 +188,14 @@ class FacebookScanner:
                     
                     
                     # Popup Handling
-                    # Keys imported above
-
+                    # We might get cookie popups or login overlays. Try to dismiss them.
+                    try:
+                        # Attempt to click "close" on any immediately visible dialogs
+                        close_btns = driver.find_elements(By.XPATH, "//div[@role='button' and @aria-label='Close']")
+                        for btn in close_btns:
+                            if btn.is_displayed():
+                                btn.click()
+                    except: pass
                     
                     last_height = driver.execute_script("return document.body.scrollHeight")
                     scroll_count = 0
@@ -144,8 +203,11 @@ class FacebookScanner:
                     retry_scrolls = 0
                     
 
-                    import time
                     while scroll_count < max_scrolls:
+                        if is_cancelled_callback and is_cancelled_callback():
+                            if status_callback: status_callback("⚠ Đã dừng quét theo yêu cầu.")
+                            break
+
                         percent = int((scroll_count / max_scrolls) * 100)
                         if progress_callback: progress_callback(percent)
                         
@@ -213,11 +275,13 @@ class FacebookScanner:
                         scroll_count += 1
                         
                 except Exception as sub_e:
-                    print(f"Error scanning tab {target_url}: {sub_e}")
+                    import traceback
+                    print(f"Error scanning tab {target_url}: {sub_e}\n{traceback.format_exc()}")
                 
                 # Notify switch
+                if is_cancelled_callback and is_cancelled_callback(): break
                 if idx < len(targets) - 1:
-                     next_tab = "Reels" if "reels" in targets[idx+1] else "Videos"
+                     next_tab = "Reels" if "reels" in targets[idx+1] or "sk=reels" in targets[idx+1] else "Videos"
                      if status_callback: status_callback(f"✅ Xong {tab_name}. Đang chuyển sang {next_tab}...")
                      time.sleep(1)
             
@@ -226,11 +290,14 @@ class FacebookScanner:
             if status_callback: status_callback(f"Đã quét xong! Tổng: {len(results)} video.")
                 
         except Exception as e:
-            print(f"Selenium Scan Error: {e}")
+            import traceback
+            print(f"Selenium Scan Error: {e}\n{traceback.format_exc()}")
             if status_callback: status_callback(f"Lỗi hệ thống: {e}")
         finally:
-            if driver: driver.quit()
-            
+            if driver:
+                try: driver.quit()
+                except: pass
+                
         return results
 
 
@@ -718,12 +785,19 @@ class VideoDownloaderApp(ctk.CTk):
         # self.gui_queue.put(lambda: self.lbl_count.configure(text=msg))
 
     def start_scan_thread(self):
+        if getattr(self, "is_scanning", False):
+            self.cancel_scan_flag = True
+            self.btn_scan.configure(state="disabled", text="⏳ Đang dừng quét...")
+            return
+
         link = self.entry_link.get().strip()
         if not link:
             messagebox.showinfo("Nhắc nhở", "Vui lòng nhập link video hoặc kênh.")
             return
 
-        self.btn_scan.configure(state="disabled", text="⏳ Đang quét... 0%")
+        self.is_scanning = True
+        self.cancel_scan_flag = False
+        self.btn_scan.configure(state="normal", text="⏳ Đang quét... 0% (Dừng)")
         
         # Clear existing
         for widget in self.scroll_frame.winfo_children():
@@ -748,8 +822,14 @@ class VideoDownloaderApp(ctk.CTk):
                 if not any(k in link for k in keywords):
                     # It's likely a profile or page URL (e.g. facebook.com/pageName)
                     # We prefer scanning the /videos tab
-                    base_link = link.rstrip("/")
-                    link = base_link + "/videos"
+                    
+                    if "profile.php?id=" in link:
+                        if "&sks=" not in link:
+                            link = link + "&sk=videos"
+                    else:
+                        base_link = link.rstrip("/")
+                        link = base_link + "/videos"
+                    
                     print(f"DEBUG: Auto-converted to video tab: {link}")
                     
                     # Update UI to reflect change
@@ -770,8 +850,10 @@ class VideoDownloaderApp(ctk.CTk):
         except Exception as e:
             self.gui_queue.put(lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
         finally:
+            self.gui_queue.put(lambda: setattr(self, 'is_scanning', False))
             self.gui_queue.put(lambda: self.btn_scan.configure(state="normal", text="Quét & Lấy Danh Sách"))
-            self.gui_queue.put(lambda: self.scan_prog.stop() or self.scan_prog.pack_forget())
+            if hasattr(self, 'scan_prog'):
+                self.gui_queue.put(lambda: self.scan_prog.stop() or self.scan_prog.pack_forget())
 
     def _scan_facebook_selenium(self, link):
         # Lazy check
@@ -783,6 +865,7 @@ class VideoDownloaderApp(ctk.CTk):
         self.gui_queue.put(lambda: self.log_msg("⚠ Đang kích hoạt robot quét sâu (Selenium)..."))
         
         scanner = FacebookScanner()
+        browser_source = self.cookie_source_var.get() if self.var_cookies.get() else None
         
         def status_cb(msg):
              self.gui_queue.put(lambda: self.log_msg(msg))
@@ -810,11 +893,14 @@ class VideoDownloaderApp(ctk.CTk):
              self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
              
         def on_progress(percent):
-             self.gui_queue.put(lambda: self.btn_scan.configure(text=f"⏳ Đang quét... {percent}%"))
+             self.gui_queue.put(lambda: self.btn_scan.configure(text=f"⏳ Đang quét... {percent}% (Dừng)"))
+
+        def is_cancelled():
+             return getattr(self, "cancel_scan_flag", False)
 
         try:
             # We don't need return value anymore as we stream results
-            scanner.scan(link, status_callback=status_cb, on_video_found=on_video, progress_callback=on_progress)
+            scanner.scan(link, status_callback=status_cb, on_video_found=on_video, progress_callback=on_progress, is_cancelled_callback=is_cancelled, browser_cookie_source=browser_source)
             return True
         except Exception as e:
             print(f"Selenium Error: {e}")
@@ -881,7 +967,7 @@ class VideoDownloaderApp(ctk.CTk):
 
         if not success and not self.stop_flag: 
              # Try Selenium Fallback for Facebook
-             if ("facebook.com" in link or "fb.watch" in link) and HAS_SELENIUM:
+             if ("facebook.com" in link or "fb.watch" in link):
                  if self._scan_facebook_selenium(link):
                      return # Success with Selenium
 
@@ -995,14 +1081,17 @@ class VideoDownloaderApp(ctk.CTk):
 
     def process_entries(self, entries, original_url):
         def update_ui():
-            self.lbl_count.configure(text=f"Đã tìm thấy {len(entries)} video")
-            
             if not entries:
-                 self.lbl_empty = ctk.CTkLabel(self.scroll_frame, text="Không tìm thấy video nào.", font=("Arial", 14), text_color=COLORS["text_secondary"])
-                 self.lbl_empty.pack(pady=50)
+                 if len(self.video_data_map) == 0:
+                     self.lbl_empty = ctk.CTkLabel(self.scroll_frame, text="Không tìm thấy video nào.", font=("Arial", 14), text_color=COLORS["text_secondary"])
+                     self.lbl_empty.pack(pady=50)
                  return
 
-            for idx, entry in enumerate(entries, 1):
+            # Use running index based on existing map size to avoid overwriting
+            start_idx = len(self.video_data_map) + 1
+
+            for i, entry in enumerate(entries):
+                idx = start_idx + i
                 title = entry.get('title', 'No Title')
                 vid_id = entry.get('id', 'Unknown')
                 
@@ -1025,15 +1114,12 @@ class VideoDownloaderApp(ctk.CTk):
                 display_type = "[Shorts]" if is_short else "[Video]"
                 display_title = f"{display_type} {title}"
                 
-                # Add to UI
-                # FIX: Must populate data BEFORE adding item because add_video_item tries to access video_data_map[idx]
-                
                 # Check history
                 is_downloaded = self.check_history(vid_id)
                 if is_downloaded:
                      display_title = f"[Đã Tải] {display_title}"
 
-                # Store data first
+                # Store data
                 self.video_data_map[idx] = {
                     "url": web_url or original_url,
                     "title": title,
@@ -1045,6 +1131,9 @@ class VideoDownloaderApp(ctk.CTk):
                 current_quality = self.quality_var.get() if hasattr(self, 'quality_var') else "Best"
                 self.add_video_item(idx, display_title, vid_id, duration, current_quality, thumb_url, is_downloaded)
 
+            # Update count label with TOTAL videos found
+            total = len(self.video_data_map)
+            self.lbl_count.configure(text=f"Đã tìm thấy {total} video")
         
         self.gui_queue.put(update_ui)
 

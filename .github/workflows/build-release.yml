@@ -1,4 +1,4 @@
-name: Build Video Downloader Pro V5
+name: Build Video Downloader Pro V8
 
 on:
   push:
@@ -15,16 +15,16 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     strategy:
       matrix:
-        os: [macos-15-intel, windows-latest] # Upgraded to macos-15-intel for continued legacy support.
+        os: [macos-15-intel, windows-latest]
         include:
           - os: macos-15-intel
-            artifact_name: VideoDownloaderProV6.app
-            zip_name: VideoDownloaderProV6_macOS.zip
+            artifact_name: VideoDownloaderProV8.app
+            zip_name: VideoDownloaderProV8_macOS.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
             yt_dlp_name: yt-dlp
           - os: windows-latest
-            artifact_name: VideoDownloaderProV6.exe
-            zip_name: VideoDownloaderProV6_Windows.zip
+            artifact_name: VideoDownloaderProV8.exe
+            zip_name: VideoDownloaderProV8_Windows.zip
             yt_dlp_url: https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
             yt_dlp_name: yt-dlp.exe
 
@@ -46,7 +46,7 @@ jobs:
           pyenv install 3.9.18
           pyenv global 3.9.18
           pip install --upgrade pip
-          pip install pyinstaller customtkinter Pillow
+          pip install pyinstaller customtkinter Pillow browser_cookie3
           echo "$HOME/.pyenv/shims" >> $GITHUB_PATH
         shell: bash
 
@@ -59,7 +59,8 @@ jobs:
 
       - name: Install Dependencies (Windows)
         if: matrix.os == 'windows-latest'
-        run: pip install pyinstaller customtkinter Pillow
+        run: pip install pyinstaller customtkinter Pillow browser_cookie3
+
       - name: Download yt-dlp
         run: |
           curl -L ${{ matrix.yt_dlp_url }} -o ${{ matrix.yt_dlp_name }}
@@ -73,42 +74,43 @@ jobs:
         if: matrix.os == 'macos-15-intel'
         run: |
           pyinstaller --noconfirm --onefile --windowed \
-            --name "VideoDownloaderProV6" \
+            --name "VideoDownloaderProV8" \
             --add-binary "yt-dlp:." \
             --hidden-import "PIL" \
             --hidden-import "PIL._tkinter_finder" \
+            --hidden-import "browser_cookie3" \
             --collect-all "customtkinter" \
             app_v8.py
 
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV6" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --collect-all "customtkinter" app_v8.py
+          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV8" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --hidden-import "browser_cookie3" --collect-all "customtkinter" app_v8.py
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
         if: matrix.os == 'macos-15-intel'
-        run: xattr -cr dist/VideoDownloaderProV6.app
+        run: xattr -cr dist/VideoDownloaderProV8.app
 
       - name: Zip macOS app
         if: matrix.os == 'macos-15-intel'
         run: |
           cd dist
-          zip -r VideoDownloaderProV6_macOS.zip VideoDownloaderProV6.app
+          zip -r VideoDownloaderProV8_macOS.zip VideoDownloaderProV8.app
 
       - name: Upload artifact (macOS)
         if: matrix.os == 'macos-15-intel'
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloaderProV6_macOS
-          path: dist/VideoDownloaderProV6_macOS.zip
+          name: VideoDownloaderProV8_macOS
+          path: dist/VideoDownloaderProV8_macOS.zip
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloaderProV6_Windows
-          path: dist/VideoDownloaderProV6.exe
+          name: VideoDownloaderProV8_Windows
+          path: dist/VideoDownloaderProV8.exe
 
   release:
     name: Create Release
@@ -120,19 +122,19 @@ jobs:
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: VideoDownloaderProV6_macOS
+          name: VideoDownloaderProV8_macOS
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: VideoDownloaderProV6_Windows
+          name: VideoDownloaderProV8_Windows
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            VideoDownloaderProV6_macOS.zip
-            VideoDownloaderProV6.exe
+            VideoDownloaderProV8_macOS.zip
+            VideoDownloaderProV8.exe
           draft: false
           prerelease: false
         env:
