@@ -815,6 +815,11 @@ class VideoDownloaderApp(ctk.CTk):
             messagebox.showinfo("Nhắc nhở", "Vui lòng nhập link video hoặc kênh.")
             return
 
+        # Auto-detect and fix Facebook links
+        link = self._auto_fix_facebook_link(link)
+        self.entry_link.delete(0, 'end')
+        self.entry_link.insert(0, link)
+
         self.is_scanning = True
         self.cancel_scan_flag = False
         self.btn_scan.configure(state="normal", text="⏳ Đang quét... 0% (Dừng)")
@@ -826,12 +831,39 @@ class VideoDownloaderApp(ctk.CTk):
         
         self.video_data_map.clear()
         
-        # Facebook Cookie Warning (Strict)
+        # Facebook: Auto-enable cookies with Chrome as default
         if ("facebook.com" in link or "fb.watch" in link) and not self.var_cookies.get():
-             messagebox.showwarning("Yêu cầu Cookies", "⚠ Phát hiện link Facebook!\n\nFacebook yêu cầu bắt buộc phải có Cookies để quét được đầy đủ Video/Reels và tránh bị chặn.\n\nVui lòng tích vào ô 'Sử dụng Cookies' (góc trái) và chọn trình duyệt hoặc file cookies để tiếp tục.")
-             return
+             self.var_cookies.set(True)
+             if self.cookie_source_var.get() == "File cookies.txt":
+                 self.cookie_source_var.set("Chrome")
+                 self.on_cookie_source_change("Chrome")
 
         threading.Thread(target=self.run_scan_logic, args=(link,), daemon=True).start()
+
+    def _auto_fix_facebook_link(self, link):
+        """Auto-detect Facebook IDs, incomplete URLs, and convert to proper Facebook URLs."""
+        original = link
+        
+        # Case 1: Pure numeric ID (e.g. "7610432726617966100" or "=7610432726617966100")
+        clean = link.lstrip('=')
+        if clean.isdigit() and len(clean) > 8:
+            link = f"https://www.facebook.com/profile.php?id={clean}"
+            print(f"DEBUG: Auto-converted ID to URL: {original} -> {link}")
+            return link
+        
+        # Case 2: Username without URL (e.g. "pagename" or "some.page.name")
+        if not link.startswith('http') and '/' not in link and '.' not in link:
+            link = f"https://www.facebook.com/{link}"
+            print(f"DEBUG: Auto-converted username to URL: {original} -> {link}")
+            return link
+        
+        # Case 3: Missing https:// (e.g. "facebook.com/pagename" or "www.facebook.com/pagename")
+        if not link.startswith('http') and ('facebook.com' in link or 'fb.watch' in link):
+            link = 'https://' + link
+            print(f"DEBUG: Auto-added https: {original} -> {link}")
+            return link
+        
+        return link
 
     def run_scan_logic(self, link):
         try:
@@ -928,11 +960,17 @@ class VideoDownloaderApp(ctk.CTk):
 
     def scan_standard(self, link):
         # For Facebook: Try Selenium FIRST (most reliable), then fallback to yt-dlp
+        selenium_error = None
+        ytdlp_error = None
+        
         if "facebook.com" in link or "fb.watch" in link:
             print("DEBUG: Facebook detected -> Trying Selenium FIRST")
-            if self._scan_facebook_selenium(link):
-                return  # Success with Selenium
-            print("DEBUG: Selenium failed, falling back to yt-dlp...")
+            try:
+                if self._scan_facebook_selenium(link):
+                    return  # Success with Selenium
+            except Exception as e:
+                selenium_error = str(e)
+            print(f"DEBUG: Selenium failed ({selenium_error}), falling back to yt-dlp...")
 
         # List of candidate URLs to try
         candidates = [link]
@@ -942,21 +980,18 @@ class VideoDownloaderApp(ctk.CTk):
             
             # 1. Handle /videos vs /reels
             if "/videos" in link:
-                # Try removing videos, or swapping to reels
                 base = link.replace("/videos", "")
                 candidates.append(base)
                 if base.endswith("/"): candidates.append(base + "reels")
                 else: candidates.append(base + "/reels")
                 
             elif "/reels" in link:
-                # Try removing reels, or swapping to videos
                 base = link.replace("/reels", "")
                 candidates.append(base)
                 if base.endswith("/"): candidates.append(base + "videos")
                 else: candidates.append(base + "/videos")
                 
             else:
-                # Neither present, try adding both
                 if link.endswith("/"): 
                     candidates.append(link + "videos")
                     candidates.append(link + "reels")
@@ -964,7 +999,7 @@ class VideoDownloaderApp(ctk.CTk):
                     candidates.append(link + "/videos")
                     candidates.append(link + "/reels")
             
-            # 2. Mobile variants for all above
+            # 2. Mobile variants
             mobile_candidates = []
             for c in candidates:
                 if "www.facebook.com" in c:
@@ -992,9 +1027,28 @@ class VideoDownloaderApp(ctk.CTk):
                 success = True
                 break
 
-        if not success and not self.stop_flag: 
-             # Only show error if all retries failed
-             self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", f"Không tìm thấy video từ link này.\nĐã thử {len(candidates)} kiểu link khác nhau nhưng đều thất bại.\n\nGợi ý: Thử link của từng video lẻ thay vì link danh sách."))
+        if not success and not self.stop_flag:
+             # Build detailed error message for Facebook
+             if "facebook.com" in link or "fb.watch" in link:
+                 error_details = []
+                 error_details.append(f"Da thu {len(candidates)} link khac nhau.")
+                 
+                 if selenium_error:
+                     if "selenium" in selenium_error.lower() or "chrome" in selenium_error.lower():
+                         error_details.append("\n⚠ Selenium/Chrome: " + selenium_error[:100])
+                     else:
+                         error_details.append("\n⚠ Robot quet: " + selenium_error[:100])
+                 
+                 tips = []
+                 tips.append("1. Dam bao da dang nhap Facebook tren Chrome")
+                 tips.append("2. DONG TAT CA cua so Chrome truoc khi quet")
+                 tips.append("3. Tat phan mem diet virus tam thoi")
+                 tips.append("4. Thu dung link cua tung video le")
+                 
+                 msg = f"Khong tim thay video tu link nay.\n{chr(10).join(error_details)}\n\nCach khac phuc:\n{chr(10).join(tips)}"
+                 self.gui_queue.put(lambda: messagebox.showerror("Loi Quet Facebook", msg))
+             else:
+                 self.gui_queue.put(lambda: messagebox.showerror("Loi Quet", f"Khong tim thay video tu link nay.\nDa thu {len(candidates)} kieu link khac nhau nhung deu that bai.\n\nGoi y: Thu link cua tung video le thay vi link danh sach."))
 
     def _try_scan(self, link):
         cmd = [TOOL_PATH, "--dump-single-json", "--no-check-certificate", "--ignore-errors", link]
