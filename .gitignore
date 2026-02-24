@@ -1,0 +1,32 @@
+# Media
+*.mp4
+*.m4a
+*.mp3
+*.webm
+
+# System
+.DS_Store
+
+# Python / Build
+__pycache__/
+build/
+dist/
+*.spec
+*.pyc
+venv/
+env/
+.env
+
+# Backups
+app_v5_old.py
+
+# Binaries
+yt-dlp
+yt-dlp.exe
+*.zip
+dist/
+build/
+*.exe
+*.app
+yt-dlp
+yt-dlp.exe

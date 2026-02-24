@@ -1,0 +1,5 @@
+customtkinter
+Pillow
+yt-dlp
+selenium
+browser-cookie3
