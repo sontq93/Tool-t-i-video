@@ -352,7 +352,68 @@ else:
 
 tool_name = "yt-dlp.exe" if platform.system() == "Windows" else "yt-dlp"
 TOOL_PATH = os.path.join(base_path, tool_name)
+
+# Writable yt-dlp path (for auto-update, since _MEIPASS is read-only)
+if getattr(sys, 'frozen', False):
+    # Frozen app: use user's AppData/home for updatable yt-dlp
+    if platform.system() == "Windows":
+        UPDATABLE_TOOL_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'VideoDownloaderPro')
+    else:
+        UPDATABLE_TOOL_DIR = os.path.join(os.path.expanduser('~'), '.VideoDownloaderPro')
+    os.makedirs(UPDATABLE_TOOL_DIR, exist_ok=True)
+    UPDATABLE_TOOL_PATH = os.path.join(UPDATABLE_TOOL_DIR, tool_name)
+    # Use updated yt-dlp if exists, else fallback to bundled
+    if os.path.exists(UPDATABLE_TOOL_PATH):
+        TOOL_PATH = UPDATABLE_TOOL_PATH
+else:
+    UPDATABLE_TOOL_DIR = base_path
+    UPDATABLE_TOOL_PATH = TOOL_PATH
+
 SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+
+def update_ytdlp(callback=None):
+    """Download latest yt-dlp binary. Returns True on success."""
+    global TOOL_PATH
+    try:
+        if platform.system() == "Windows":
+            url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+        else:
+            url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        
+        target = UPDATABLE_TOOL_PATH
+        if callback: callback("Dang tai yt-dlp moi nhat...")
+        print(f"Updating yt-dlp: {url} -> {target}")
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
+            data = response.read()
+        
+        # Write to temp first, then rename (atomic)
+        tmp_path = target + ".tmp"
+        with open(tmp_path, 'wb') as f:
+            f.write(data)
+        
+        # Replace
+        if os.path.exists(target):
+            os.remove(target)
+        os.rename(tmp_path, target)
+        
+        # Make executable on Unix
+        if platform.system() != "Windows":
+            os.chmod(target, 0o755)
+        
+        TOOL_PATH = target
+        if callback: callback(f"Da cap nhat yt-dlp thanh cong! ({len(data)//1024//1024}MB)")
+        print(f"yt-dlp updated successfully: {target} ({len(data)} bytes)")
+        return True
+    except Exception as e:
+        print(f"yt-dlp update failed: {e}")
+        if callback: callback(f"Khong cap nhat duoc yt-dlp: {e}")
+        return False
 
 def check_ffmpeg():
     # Check local first
@@ -376,6 +437,9 @@ class VideoDownloaderApp(ctk.CTk):
         self.video_data_map = {}
         self.stop_flag = False
         self.download_thread_running = False
+
+        # Auto-update yt-dlp in background on launch
+        threading.Thread(target=self._auto_update_ytdlp, daemon=True).start()
 
         # --- LAYOUT GRID ---
         self.grid_columnconfigure(0, weight=0, minsize=400) # Sidebar Fixed
@@ -572,7 +636,15 @@ class VideoDownloaderApp(ctk.CTk):
                                          border_width=1, border_color=COLORS["border"],
                                          hover_color=COLORS["bg_main"], font=("Arial", 14, "bold"),
                                          command=self.start_direct_download)
-        self.btn_fast_dl.pack(fill="x")
+        self.btn_fast_dl.pack(fill="x", pady=(0, 8))
+
+        # Update yt-dlp button
+        self.btn_update = ctk.CTkButton(actions_inner, text="\U0001f504 Cap nhat yt-dlp", 
+                                         height=32, corner_radius=8,
+                                         fg_color="transparent", text_color=COLORS["text_secondary"],
+                                         font=("Arial", 11), hover_color=COLORS["bg_main"],
+                                         command=self.manual_update_ytdlp)
+        self.btn_update.pack(fill="x")
 
     def create_checkbox(self, parent, title, subtitle, variable):
         # Simulated Card Checkbox
@@ -815,8 +887,8 @@ class VideoDownloaderApp(ctk.CTk):
             messagebox.showinfo("Nhắc nhở", "Vui lòng nhập link video hoặc kênh.")
             return
 
-        # Auto-detect and fix Facebook links
-        link = self._auto_fix_facebook_link(link)
+        # Auto-detect and fix links (Facebook IDs, TikTok tracking params, etc.)
+        link = self._auto_fix_link(link)
         self.entry_link.delete(0, 'end')
         self.entry_link.insert(0, link)
 
@@ -840,10 +912,11 @@ class VideoDownloaderApp(ctk.CTk):
 
         threading.Thread(target=self.run_scan_logic, args=(link,), daemon=True).start()
 
-    def _auto_fix_facebook_link(self, link):
-        """Auto-detect Facebook IDs, incomplete URLs, and convert to proper Facebook URLs."""
+    def _auto_fix_link(self, link):
+        """Auto-detect and fix Facebook IDs, TikTok links, and incomplete URLs."""
         original = link
         
+        # === FACEBOOK ===
         # Case 1: Pure numeric ID (e.g. "7610432726617966100" or "=7610432726617966100")
         clean = link.lstrip('=')
         if clean.isdigit() and len(clean) > 8:
@@ -851,19 +924,58 @@ class VideoDownloaderApp(ctk.CTk):
             print(f"DEBUG: Auto-converted ID to URL: {original} -> {link}")
             return link
         
-        # Case 2: Username without URL (e.g. "pagename" or "some.page.name")
-        if not link.startswith('http') and '/' not in link and '.' not in link:
+        # Case 2: Username without URL (no dots, no slashes, no http)
+        if not link.startswith('http') and '/' not in link and '.' not in link and '@' not in link:
             link = f"https://www.facebook.com/{link}"
             print(f"DEBUG: Auto-converted username to URL: {original} -> {link}")
             return link
         
-        # Case 3: Missing https:// (e.g. "facebook.com/pagename" or "www.facebook.com/pagename")
+        # Case 3: Missing https://
         if not link.startswith('http') and ('facebook.com' in link or 'fb.watch' in link):
             link = 'https://' + link
             print(f"DEBUG: Auto-added https: {original} -> {link}")
             return link
         
+        # === TIKTOK ===
+        if 'tiktok.com' in link or 'tiktok' in link.lower():
+            # Remove tracking parameters that can cause issues
+            if '?' in link:
+                base = link.split('?')[0]
+                # Keep only essential params (none needed for TikTok)
+                link = base
+                print(f"DEBUG: Cleaned TikTok URL: {original} -> {link}")
+            
+            # Fix mobile links
+            if 'm.tiktok.com' in link:
+                link = link.replace('m.tiktok.com', 'www.tiktok.com')
+                print(f"DEBUG: Fixed mobile TikTok URL: {original} -> {link}")
+        
+        # Missing https for tiktok
+        if not link.startswith('http') and 'tiktok.com' in link:
+            link = 'https://' + link
+        
         return link
+
+    def _auto_update_ytdlp(self):
+        """Auto-update yt-dlp on app launch (background)."""
+        try:
+            def cb(msg): print(f"[Auto-Update] {msg}")
+            update_ytdlp(callback=cb)
+        except Exception as e:
+            print(f"Auto-update failed: {e}")
+
+    def manual_update_ytdlp(self):
+        """Manual yt-dlp update triggered by button."""
+        self.btn_update.configure(state="disabled", text="Dang cap nhat...")
+        def task():
+            def cb(msg):
+                self.gui_queue.put(lambda: self.btn_update.configure(text=msg))
+            success = update_ytdlp(callback=cb)
+            if success:
+                self.gui_queue.put(lambda: self.btn_update.configure(state="normal", text="Da cap nhat yt-dlp!"))
+            else:
+                self.gui_queue.put(lambda: self.btn_update.configure(state="normal", text="Loi cap nhat. Thu lai?"))
+        threading.Thread(target=task, daemon=True).start()
 
     def run_scan_logic(self, link):
         try:
