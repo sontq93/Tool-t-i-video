@@ -78,12 +78,12 @@ jobs:
             --hidden-import "PIL" \
             --hidden-import "PIL._tkinter_finder" \
             --collect-all "customtkinter" \
-            app_v5.py
+            app_v8.py
 
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV6" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --collect-all "customtkinter" app_v5.py
+          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV6" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --collect-all "customtkinter" app_v8.py
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
