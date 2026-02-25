@@ -68,6 +68,227 @@ def CreateToolTip(widget, text):
 # Removed top-level imports
 
 
+class TikTokScanner:
+    """TikTok scanner using undetected-chromedriver to bypass bot detection."""
+    def __init__(self):
+        pass
+    
+    def _create_driver(self, status_callback=None):
+        """Create an undetected Chrome driver. Falls back to regular selenium if uc not available."""
+        try:
+            import undetected_chromedriver as uc
+            
+            if status_callback: status_callback("🤖 Đang khởi động trình duyệt (anti-bot)...")
+            options = uc.ChromeOptions()
+            options.add_argument('--headless=new')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--mute-audio')
+            options.add_argument('--window-size=1920,1080')
+            
+            driver = uc.Chrome(options=options, use_subprocess=True)
+            driver.set_page_load_timeout(30)
+            return driver
+        except ImportError:
+            if status_callback: status_callback("⚠ undetected-chromedriver chưa cài, thử Selenium thường...")
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.options import Options
+                from webdriver_manager.chrome import ChromeDriverManager
+                from selenium.webdriver.chrome.service import Service
+                
+                options = Options()
+                options.add_argument("--headless=new")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--mute-audio")
+                options.add_argument("--window-size=1920,1080")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                options.add_experimental_option('excludeSwitches', ['enable-automation'])
+                
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=options)
+                driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                    'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined});'
+                })
+                driver.set_page_load_timeout(30)
+                return driver
+            except Exception as e:
+                if status_callback: status_callback(f"❌ Không khởi động được trình duyệt: {e}")
+                return None
+        except Exception as e:
+            if status_callback: status_callback(f"❌ Lỗi khởi động: {e}")
+            return None
+
+    def scan_single(self, url, status_callback=None):
+        """Scan a single TikTok video URL using undetected Chrome."""
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        
+        driver = self._create_driver(status_callback)
+        if not driver:
+            return None
+
+        try:
+            if status_callback: status_callback("🤖 Đang tải trang TikTok...")
+            driver.get(url)
+            time.sleep(5)
+
+            result = None
+            # Method 1: Extract from __UNIVERSAL_DATA_FOR_REHYDRATION__ script
+            try:
+                scripts = driver.find_elements(By.TAG_NAME, "script")
+                for script in scripts:
+                    try:
+                        content = script.get_attribute("innerHTML") or ""
+                        if "__UNIVERSAL_DATA_FOR_REHYDRATION__" in content:
+                            json_str = content.split("=", 1)[1].strip().rstrip(";")
+                            data = json.loads(json_str)
+                            default_scope = data.get("__DEFAULT_SCOPE__", {})
+                            video_detail = default_scope.get("webapp.video-detail", {})
+                            item_info = video_detail.get("itemInfo", {}).get("itemStruct", {})
+                            
+                            if item_info:
+                                video_data = item_info.get("video", {})
+                                thumb = video_data.get("cover", "") or video_data.get("originCover", "")
+                                duration = video_data.get("duration", 0)
+                                desc = item_info.get("desc", "TikTok Video")
+                                video_id = item_info.get("id", url.split("/")[-1])
+                                
+                                result = {
+                                    'id': video_id,
+                                    'title': desc[:80] if desc else f"TikTok {video_id}",
+                                    'url': url,
+                                    'webpage_url': url,
+                                    'thumbnail': thumb,
+                                    'duration': duration,
+                                    'duration_string': f"{duration//60}:{duration%60:02d}" if duration else None,
+                                    'resolution': f"{video_data.get('width','?')}x{video_data.get('height','?')}",
+                                }
+                                print(f"TikTok UC: Found video via JSON: {desc[:50]}")
+                                break
+                    except: pass
+            except: pass
+
+            # Method 2: Extract from <video> tag
+            if not result:
+                try:
+                    video_elem = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "video"))
+                    )
+                    src = video_elem.get_attribute("src")
+                    if src:
+                        try:
+                            title_elem = driver.find_element(By.XPATH, "//h1 | //span[@data-e2e='browse-video-desc']")
+                            title = title_elem.text[:80] if title_elem else "TikTok Video"
+                        except:
+                            title = "TikTok Video"
+                        result = {
+                            'id': url.split("/")[-1],
+                            'title': title,
+                            'url': url,
+                            'webpage_url': url,
+                            'thumbnail': None,
+                            'duration': 0,
+                        }
+                        print(f"TikTok UC: Found video via <video> tag")
+                except: pass
+
+            if result and status_callback:
+                status_callback(f"✅ Tìm thấy: {result['title'][:40]}...")
+            elif not result and status_callback:
+                status_callback("⚠ Không tìm thấy video trên trang")
+            return result
+        except Exception as e:
+            import traceback
+            print(f"TikTok UC Error: {e}\n{traceback.format_exc()}")
+            if status_callback: status_callback(f"❌ Lỗi: {e}")
+            return None
+        finally:
+            try: driver.quit()
+            except: pass
+
+    def scan_channel(self, channel_url, status_callback=None, on_video_found=None, progress_callback=None, is_cancelled_callback=None):
+        """Scan a TikTok channel/profile using undetected Chrome."""
+        from selenium.webdriver.common.by import By
+        
+        driver = self._create_driver(status_callback)
+        if not driver:
+            return []
+
+        results = []
+        unique_links = set()
+        
+        try:
+            if status_callback: status_callback("🤖 Đang tải trang kênh TikTok...")
+            driver.get(channel_url)
+            time.sleep(5)
+            
+            print(f"TikTok UC: Page title = {driver.title}")
+
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            scroll_count = 0
+            max_scrolls = 50
+            retry_scrolls = 0
+
+            while scroll_count < max_scrolls:
+                if is_cancelled_callback and is_cancelled_callback():
+                    break
+                
+                percent = int((scroll_count / max_scrolls) * 100)
+                if progress_callback: progress_callback(percent)
+                if status_callback: status_callback(f"🤖 Đang cuộn trang ({scroll_count}/{max_scrolls})... Tìm thấy {len(results)} video")
+                
+                driver.execute_script("window.scrollBy(0, 2000);")
+                time.sleep(1)
+                
+                # Extract video links
+                links = driver.find_elements(By.TAG_NAME, "a")
+                for link_elem in links:
+                    try:
+                        href = link_elem.get_attribute("href")
+                        if href and "/video/" in href:
+                            clean = href.split("?")[0]
+                            if clean not in unique_links:
+                                unique_links.add(clean)
+                                vid_id = clean.split("/")[-1]
+                                video_item = {
+                                    'id': vid_id,
+                                    'title': f'TikTok Video {vid_id[-8:]}',
+                                    'url': clean,
+                                    'webpage_url': clean,
+                                    'thumbnail': None,
+                                    'duration': 0,
+                                }
+                                results.append(video_item)
+                                if on_video_found: on_video_found(video_item)
+                    except: pass
+                
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    retry_scrolls += 1
+                    if retry_scrolls >= 5: break
+                    time.sleep(1)
+                else:
+                    retry_scrolls = 0
+                last_height = new_height
+                scroll_count += 1
+            
+            if progress_callback: progress_callback(100)
+            if status_callback: status_callback(f"✅ Quét xong! Tổng: {len(results)} video")
+        except Exception as e:
+            import traceback
+            print(f"TikTok UC Channel Error: {e}\n{traceback.format_exc()}")
+            if status_callback: status_callback(f"❌ Lỗi: {e}")
+        finally:
+            try: driver.quit()
+            except: pass
+        
+        return results
+
+
 class FacebookScanner:
     def __init__(self):
         pass # Imports are handled in scan() for speed
@@ -100,7 +321,7 @@ class FacebookScanner:
         options.add_argument("--disable-notifications")
         options.add_argument("--mute-audio")
         options.add_argument("--window-size=1920,1080")
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
         # Extract cookies from browser using browser_cookie3
         fb_cookies = []
@@ -347,7 +568,7 @@ class VideoDownloaderApp(ctk.CTk):
         super().__init__()
 
         # Window Config
-        self.title("Video Downloader Pro v6.2")
+        self.title("Video Downloader Pro v8.0")
         self.geometry("1100x700")
         self.configure(fg_color=COLORS["bg_main"])  # App background
 
@@ -839,12 +1060,28 @@ class VideoDownloaderApp(ctk.CTk):
             is_youtube_channel = ("youtube.com" in link) and ("youtu.be" not in link)
             is_channel_scan = False
             
-            if is_youtube_channel and ("/videos" not in link and "/shorts" not in link and "watch?v=" not in link):
+            # TikTok Channel Detection - Skip yt-dlp entirely for channels (hangs)
+            is_tiktok_channel = ("tiktok.com" in link) and ("/@" in link) and ("/video/" not in link)
+            
+            if is_tiktok_channel:
+                 # Go directly to Selenium for TikTok channels
+                 self.gui_queue.put(lambda: self.log_msg("📋 Phát hiện kênh TikTok → Quét bằng Selenium..."))
+                 print(f"DEBUG run_scan_logic: calling _scan_tiktok_selenium({link})")
+                 try:
+                     scan_result = self._scan_tiktok_selenium(link)
+                     print(f"DEBUG run_scan_logic: _scan_tiktok_selenium returned {scan_result}")
+                     if not scan_result:
+                         self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", "Không quét được kênh TikTok này.\n\nGợi ý:\n1. Kiểm tra link có đúng không\n2. Kênh có thể bị ẩn/private"))
+                 except Exception as e:
+                     import traceback
+                     print(f"DEBUG run_scan_logic TikTok EXCEPTION: {e}\n{traceback.format_exc()}")
+                     self.gui_queue.put(lambda: messagebox.showerror("Lỗi", f"Lỗi quét TikTok: {e}"))
+            elif is_youtube_channel and ("/videos" not in link and "/shorts" not in link and "watch?v=" not in link):
                  # Dual Scan Logic
                  is_channel_scan = True
                  self.scan_youtube_channel(link)
             else:
-                 # Standard Scan
+                 # Standard Scan (yt-dlp first, Selenium fallback)
                  self.scan_standard(link)
 
         except Exception as e:
@@ -854,6 +1091,65 @@ class VideoDownloaderApp(ctk.CTk):
             self.gui_queue.put(lambda: self.btn_scan.configure(state="normal", text="Quét & Lấy Danh Sách"))
             if hasattr(self, 'scan_prog'):
                 self.gui_queue.put(lambda: self.scan_prog.stop() or self.scan_prog.pack_forget())
+
+    def _scan_tiktok_selenium(self, link):
+        """TikTok scan using undetected-chromedriver."""
+        # Check if undetected_chromedriver or selenium is available
+        try:
+            import undetected_chromedriver
+            print("DEBUG _scan_tiktok_selenium: undetected_chromedriver available")
+        except ImportError:
+            try:
+                import selenium
+                print("DEBUG _scan_tiktok_selenium: selenium available (fallback)")
+            except ImportError:
+                print("DEBUG _scan_tiktok_selenium: NO browser driver available!")
+                self.gui_queue.put(lambda: self.log_msg("❌ Cần cài undetected-chromedriver hoặc selenium"))
+                return False
+        
+        self.gui_queue.put(lambda: self.log_msg("🤖 Đang quét TikTok bằng trình duyệt ẩn..."))
+        
+        scanner = TikTokScanner()
+        
+        def status_cb(msg):
+            self.gui_queue.put(lambda m=msg: self.log_msg(m))
+            print(f"TikTok scan: {msg}")
+        
+        def on_progress(percent):
+            self.gui_queue.put(lambda p=percent: self.btn_scan.configure(text=f"⏳ Đang quét... {p}% (Dừng)"))
+        
+        def is_cancelled():
+            return getattr(self, "cancel_scan_flag", False)
+        
+        try:
+            is_single_video = "/video/" in link
+            print(f"DEBUG _scan_tiktok_selenium: is_single={is_single_video}, link={link}")
+            
+            if is_single_video:
+                result = scanner.scan_single(link, status_callback=status_cb)
+                print(f"DEBUG _scan_tiktok_selenium: single result = {result is not None}")
+                if result:
+                    self.process_entries([result], link)
+                    self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
+                    return True
+            else:
+                found_count = [0]
+                def on_video(v_item):
+                    found_count[0] += 1
+                    print(f"DEBUG on_video: #{found_count[0]} {v_item.get('url','?')}")
+                    self.process_entries([v_item], link)
+                    self.gui_queue.put(lambda: self.toggle_all_checkboxes(True))
+                
+                results = scanner.scan_channel(link, status_callback=status_cb, on_video_found=on_video, progress_callback=on_progress, is_cancelled_callback=is_cancelled)
+                print(f"DEBUG _scan_tiktok_selenium: channel results = {len(results)}")
+                return len(results) > 0
+            
+            return False
+        except Exception as e:
+            import traceback
+            print(f"TikTok Selenium Error: {e}\n{traceback.format_exc()}")
+            self.gui_queue.put(lambda: self.log_msg(f"❌ Lỗi quét TikTok: {e}"))
+            return False
 
     def _scan_facebook_selenium(self, link):
         # Lazy check
@@ -959,20 +1255,32 @@ class VideoDownloaderApp(ctk.CTk):
         print(f"DEBUG: Scanning candidates: {candidates}")
         
         success = False
+        max_retries = 2  # Retry each candidate up to 2 times
         for c_link in candidates:
-            print(f"Trying: {c_link}")
-            if self._try_scan(c_link):
-                success = True
+            for attempt in range(max_retries):
+                print(f"Trying: {c_link} (attempt {attempt+1}/{max_retries})")
+                if self._try_scan(c_link):
+                    success = True
+                    break
+                if attempt < max_retries - 1:
+                    print(f"Retrying {c_link} in 2s...")
+                    time.sleep(2)
+            if success:
                 break
 
         if not success and not self.stop_flag: 
+             # Try Selenium Fallback for TikTok
+             if "tiktok.com" in link:
+                 if self._scan_tiktok_selenium(link):
+                     return
+             
              # Try Selenium Fallback for Facebook
              if ("facebook.com" in link or "fb.watch" in link):
                  if self._scan_facebook_selenium(link):
-                     return # Success with Selenium
+                     return
 
              # Only show error if all retries failed
-             self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", f"Không tìm thấy video từ link này.\nĐã thử {len(candidates)} kiểu link khác nhau nhưng đều thất bại.\n\nGợi ý: Thử link của từng video lẻ thay vì link danh sách."))
+             self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", f"Không tìm thấy video từ link này.\nĐã thử yt-dlp + Selenium nhưng đều thất bại.\n\nGợi ý:\n1. Kiểm tra link hợp lệ\n2. Bật Cookies nếu link Facebook\n3. Thử link video cụ thể thay vì danh sách"))
 
     def _try_scan(self, link):
         cmd = [TOOL_PATH, "--dump-single-json", "--no-check-certificate", "--ignore-errors", link]
@@ -980,9 +1288,16 @@ class VideoDownloaderApp(ctk.CTk):
         # UA Fix - Use Desktop UA for Facebook to match Cookies better
         if "facebook.com" in link or "fb.watch" in link:
              # Use Standard Windows 10 Chrome UA - safest for most cookies
-             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"])
+             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"])
+        elif "tiktok.com" in link:
+             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"])
+             # TikTok-specific bypass
+             cmd.extend(["--extractor-args", "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com"])
         else:
              cmd.extend(["--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])
+        
+        # Timeout & Retry for network stability
+        cmd.extend(["--socket-timeout", "30", "--retries", "3"])
         
         if self.var_cookies.get():
              source = self.cookie_source_var.get()
@@ -997,10 +1312,10 @@ class VideoDownloaderApp(ctk.CTk):
 
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
-            stdout, stderr = process.communicate()
+            stdout, stderr = process.communicate(timeout=120)  # Prevent hanging forever
             
             if process.returncode != 0:
-                 print(f"Scan failed for {link}: {stderr[:100]}")
+                 print(f"Scan failed for {link}: {stderr[:200]}")
                  return False
 
             data = json.loads(stdout)
@@ -1013,7 +1328,12 @@ class VideoDownloaderApp(ctk.CTk):
             
             self.process_entries(entries, link)
             return True
-            
+        
+        except subprocess.TimeoutExpired:
+             print(f"Scan timed out for {link} (120s)")
+             try: process.kill()
+             except: pass
+             return False
         except Exception as e:
              print(f"Error parsing JSON for {link}: {e}")
              return False
@@ -1041,7 +1361,7 @@ class VideoDownloaderApp(ctk.CTk):
             
             cmd = [TOOL_PATH, "--flat-playlist", "--dump-single-json", "--playlist-end", "50", "--no-check-certificate", "--ignore-errors", t_url]
             # Custom UA & Anti-Block
-            cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"])
+            cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"])
             cmd.extend(["--extractor-args", "youtube:player_client=android"])
 
             try:
@@ -1405,11 +1725,13 @@ class VideoDownloaderApp(ctk.CTk):
              
              # ANTI-BLOCK & BYPASS
              # 1. User Agent
-             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"])
+             cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"])
              
-             # 2. YouTube Specific Bypass (Client Masquerade)
+             # 2. Platform-Specific Bypass
              if "youtube.com" in url or "youtu.be" in url:
                   cmd.extend(["--extractor-args", "youtube:player_client=android"])
+             elif "tiktok.com" in url:
+                  cmd.extend(["--extractor-args", "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com"])
 
              
              # Name template
@@ -1477,6 +1799,9 @@ class VideoDownloaderApp(ctk.CTk):
              # STABILITY FIX: Disable multi-threaded downloader to prevent HTTP 416 errors
              # Removed --no-part, added -N 1
              cmd.extend(["-N", "1"])
+             
+             # Network stability: timeout + retries
+             cmd.extend(["--socket-timeout", "30", "--retries", "5", "--fragment-retries", "5"])
              cmd.append(url)
              
              # Run & Parse Output Realtime

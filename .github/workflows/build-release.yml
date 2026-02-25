@@ -46,7 +46,7 @@ jobs:
           pyenv install 3.9.18
           pyenv global 3.9.18
           pip install --upgrade pip
-          pip install pyinstaller customtkinter Pillow browser_cookie3
+          pip install pyinstaller customtkinter Pillow browser_cookie3 selenium webdriver-manager undetected-chromedriver
           echo "$HOME/.pyenv/shims" >> $GITHUB_PATH
         shell: bash
 
@@ -59,7 +59,7 @@ jobs:
 
       - name: Install Dependencies (Windows)
         if: matrix.os == 'windows-latest'
-        run: pip install pyinstaller customtkinter Pillow browser_cookie3
+        run: pip install pyinstaller customtkinter Pillow browser_cookie3 selenium webdriver-manager undetected-chromedriver
 
       - name: Download yt-dlp
         run: |
@@ -80,12 +80,14 @@ jobs:
             --hidden-import "PIL._tkinter_finder" \
             --hidden-import "browser_cookie3" \
             --collect-all "customtkinter" \
+            --collect-all "undetected_chromedriver" \
+            --collect-all "selenium" \
             app_v8.py
 
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV8" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --hidden-import "browser_cookie3" --collect-all "customtkinter" app_v8.py
+          pyinstaller --noconfirm --onefile --windowed --name "VideoDownloaderProV8" --add-binary "yt-dlp.exe;." --hidden-import "PIL" --hidden-import "PIL._tkinter_finder" --hidden-import "browser_cookie3" --collect-all "customtkinter" --collect-all "undetected_chromedriver" --collect-all "selenium" app_v8.py
         shell: cmd
 
       - name: Remove macOS Gatekeeper attributes
