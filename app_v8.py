@@ -64,6 +64,40 @@ def CreateToolTip(widget, text):
     widget.bind('<Enter>', enter)
     widget.bind('<Leave>', leave)
 
+def add_right_click_menu(widget):
+    """Adds a standard right-click context menu (Cut, Copy, Paste) to CustomTkinter entry/text widgets."""
+    menu = tk.Menu(widget, tearoff=0)
+    
+    def on_cut():
+        widget.event_generate("<<Cut>>")
+    def on_copy():
+        widget.event_generate("<<Copy>>")
+    def on_paste():
+        widget.event_generate("<<Paste>>")
+
+    menu.add_command(label="Cut", command=on_cut)
+    menu.add_command(label="Copy", command=on_copy)
+    menu.add_command(label="Paste", command=on_paste)
+
+    def show_menu(event):
+        # Only show Cut/Copy if there is a selection
+        try:
+            widget.selection_get()
+            menu.entryconfigure("Cut", state="normal")
+            menu.entryconfigure("Copy", state="normal")
+        except:
+            menu.entryconfigure("Cut", state="disabled")
+            menu.entryconfigure("Copy", state="disabled")
+        
+        menu.tk_popup(event.x_root, event.y_root)
+
+    # Bind right-click (Button-3 on Windows/Linux, Button-2/3 on macOS)
+    if platform.system() == "Darwin":
+        widget.bind("<Button-2>", show_menu)
+        widget.bind("<Button-3>", show_menu)
+    else:
+        widget.bind("<Button-3>", show_menu)
+
 # Selenium Imports (Lazy Loaded in methods to speed up App Launch)
 # Removed top-level imports
 
@@ -85,8 +119,7 @@ class TikTokScanner:
             options.add_argument('--disable-gpu')
             options.add_argument('--mute-audio')
             options.add_argument('--window-size=1920,1080')
-            
-            driver = uc.Chrome(options=options, use_subprocess=True)
+            driver = uc.Chrome(options=options, use_subprocess=True, version_main=145)
             driver.set_page_load_timeout(30)
             return driver
         except ImportError:
@@ -230,7 +263,7 @@ class TikTokScanner:
 
             last_height = driver.execute_script("return document.body.scrollHeight")
             scroll_count = 0
-            max_scrolls = 50
+            max_scrolls = 200
             retry_scrolls = 0
 
             while scroll_count < max_scrolls:
@@ -241,7 +274,8 @@ class TikTokScanner:
                 if progress_callback: progress_callback(percent)
                 if status_callback: status_callback(f"🤖 Đang cuộn trang ({scroll_count}/{max_scrolls})... Tìm thấy {len(results)} video")
                 
-                driver.execute_script("window.scrollBy(0, 2000);")
+                # Scroll to the absolute bottom of the document
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(1)
                 
                 # Extract video links
@@ -254,12 +288,38 @@ class TikTokScanner:
                             if clean not in unique_links:
                                 unique_links.add(clean)
                                 vid_id = clean.split("/")[-1]
+                                
+                                # Extract thumbnail
+                                thumb = None
+                                try:
+                                    img = link_elem.find_element(By.XPATH, ".//img")
+                                    thumb = img.get_attribute("src")
+                                except:
+                                    try:
+                                        img = link_elem.find_element(By.XPATH, "..//img")
+                                        thumb = img.get_attribute("src")
+                                    except: pass
+                                    
+                                # Extract title/description
+                                title = link_elem.get_attribute("title")
+                                if not title:
+                                    try:
+                                        text_content = link_elem.text.strip()
+                                        if text_content and len(text_content) > 3:
+                                            title = text_content
+                                    except: pass
+                                
+                                if not title:
+                                    title = f"TikTok Video {vid_id[-8:]}"
+                                else:
+                                    title = title.replace("\n", " ")[:80]
+                                
                                 video_item = {
                                     'id': vid_id,
-                                    'title': f'TikTok Video {vid_id[-8:]}',
+                                    'title': f"[Video] {title}",
                                     'url': clean,
                                     'webpage_url': clean,
-                                    'thumbnail': None,
+                                    'thumbnail': thumb,
                                     'duration': 0,
                                 }
                                 results.append(video_item)
@@ -269,7 +329,8 @@ class TikTokScanner:
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     retry_scrolls += 1
-                    if retry_scrolls >= 5: break
+                    # Wait up to 10 seconds for more items to load
+                    if retry_scrolls >= 10: break
                     time.sleep(1)
                 else:
                     retry_scrolls = 0
@@ -568,7 +629,7 @@ class VideoDownloaderApp(ctk.CTk):
         super().__init__()
 
         # Window Config
-        self.title("Video Downloader Pro v8.0")
+        self.title("Video Downloader Pro v8.1.0")
         self.geometry("1100x700")
         self.configure(fg_color=COLORS["bg_main"])  # App background
 
@@ -620,7 +681,7 @@ class VideoDownloaderApp(ctk.CTk):
         ctk.CTkLabel(title_frame, text="Video Downloader", 
                      font=("Segoe UI" if platform.system() == "Windows" else "Helvetica Neue", 18, "bold"), 
                      text_color=COLORS["text_primary"]).pack(anchor="w")
-        ctk.CTkLabel(title_frame, text="Pro Version 8.0", 
+        ctk.CTkLabel(title_frame, text="Pro Version 8.1.0", 
                      font=("Arial", 12), text_color=COLORS["text_secondary"]).pack(anchor="w")
 
         # 2. Controls Area (Scrollable to fit inputs + options)
@@ -644,6 +705,7 @@ class VideoDownloaderApp(ctk.CTk):
                                        height=45, corner_radius=12, border_width=0,
                                        fg_color="transparent", text_color=COLORS["text_primary"])
         self.entry_link.pack(fill="x", padx=10, pady=2)
+        add_right_click_menu(self.entry_link._entry) # Bind to inner entry
         
         # Batch Import Link
         btn_batch = ctk.CTkButton(url_group, text="📋 Nhập nhiều Link", width=100, height=24,
@@ -668,6 +730,7 @@ class VideoDownloaderApp(ctk.CTk):
                                          text_color=COLORS["text_secondary"])
         self.entry_folder.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.entry_folder.insert(0, os.getcwd())
+        add_right_click_menu(self.entry_folder._entry) # Bind to inner entry
         
         btn_browse = ctk.CTkButton(folder_group, text="Chọn", width=70, height=42,
                                    fg_color=COLORS["white"], text_color=COLORS["text_secondary"],
@@ -937,6 +1000,7 @@ class VideoDownloaderApp(ctk.CTk):
         
         txt_input = ctk.CTkTextbox(dialog, width=450, height=250)
         txt_input.pack(pady=10)
+        add_right_click_menu(txt_input._textbox) # Bind to inner text widget
         txt_input.focus()
         
         def on_confirm():
@@ -1036,6 +1100,12 @@ class VideoDownloaderApp(ctk.CTk):
 
     def run_scan_logic(self, link):
         try:
+            # Auto fix malformed URLs (e.g., missing http, or 'ps://' from partial copy)
+            link = link.strip()
+            if link.startswith("ps://"): link = "htt" + link
+            elif not link.startswith("http://") and not link.startswith("https://"): 
+                link = "https://" + link
+
             # Auto fix Facebook link
             if "facebook.com" in link or "fb.watch" in link:
                 # Don't modify if it looks like a specific video, reel, or playlist/album
@@ -1071,7 +1141,9 @@ class VideoDownloaderApp(ctk.CTk):
                      scan_result = self._scan_tiktok_selenium(link)
                      print(f"DEBUG run_scan_logic: _scan_tiktok_selenium returned {scan_result}")
                      if not scan_result:
-                         self.gui_queue.put(lambda: messagebox.showerror("Lỗi Quét", "Không quét được kênh TikTok này.\n\nGợi ý:\n1. Kiểm tra link có đúng không\n2. Kênh có thể bị ẩn/private"))
+                         # Fallback to standard yt-dlp if Selenium fails
+                         self.gui_queue.put(lambda: self.log_msg("⚠ Quét Selenium bị lỗi, thử lại bằng YT-DLP..."))
+                         self.scan_standard(link)
                  except Exception as e:
                      import traceback
                      print(f"DEBUG run_scan_logic TikTok EXCEPTION: {e}\n{traceback.format_exc()}")
@@ -1649,6 +1721,12 @@ class VideoDownloaderApp(ctk.CTk):
         if not link:
              messagebox.showinfo("Lỗi", "Vui lòng nhập link.")
              return
+             
+        # Auto fix malformed URLs
+        if link.startswith("ps://"): link = "htt" + link
+        elif not link.startswith("http://") and not link.startswith("https://"): 
+            link = "https://" + link
+            
         threading.Thread(target=self.run_download_logic, args=([{'url': link, 'title': 'Quick Download', 'id': 'quick'}], True), daemon=True).start()
 
     def start_download_thread(self):
@@ -1721,7 +1799,7 @@ class VideoDownloaderApp(ctk.CTk):
              self.gui_queue.put(lambda: update_prog(0))
              
              # Build CMD
-             cmd = [TOOL_PATH, "--no-check-certificate", "--ignore-errors", "--newline"]
+             cmd = [TOOL_PATH, "--no-check-certificate", "--newline"]
              
              # ANTI-BLOCK & BYPASS
              # 1. User Agent
@@ -1847,6 +1925,15 @@ class VideoDownloaderApp(ctk.CTk):
                          break
                      if line:
                          line = line.strip()
+                         
+                         # Check for TikTok Shopping Cart / Carousel (Audio-only when Video requested)
+                         if "requested format not available" in line.lower() or "audio only" in line.lower():
+                             if not is_mp3 and "tiktok.com" in attempt_url:
+                                 found_error = "Video Ảnh/Giỏ Hàng (không hỗ trợ MP4)"
+                                 update_status("❌ Ảnh/Giỏ hàng", "red")
+                                 process.terminate()
+                                 break
+                                 
                          # Relaxed Regex Progress (Look for any % number)
                          perc = re.search(r'(\d+(?:\.\d+)?)%', line)
                          if perc:
@@ -1882,6 +1969,7 @@ class VideoDownloaderApp(ctk.CTk):
                  
                  if status_ok:
                      update_status("✅ Hoàn tất", COLORS["green_success"])
+                     self.gui_queue.put(lambda: update_prog(1.0))
                      success_count += 1
                      download_succeeded = True
                      if item.get('id'): self.add_to_history(item.get('id'))
