@@ -1804,9 +1804,36 @@ class VideoDownloaderApp(ctk.CTk):
              cmd.extend(["--socket-timeout", "30", "--retries", "5", "--fragment-retries", "5"])
              cmd.append(url)
              
-             # Run & Parse Output Realtime
-             try:
-                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
+             
+             # Facebook URL variants for retry when yt-dlp parser fails
+             fb_retry_urls = []
+             if "facebook.com" in url or "fb.watch" in url:
+                 vid_match = re.search(r'/(?:reel|videos?|watch/?\?v=|posts/)(\d+)', url)
+                 if vid_match:
+                     vid_id = vid_match.group(1)
+                     for v in [
+                         f"https://www.facebook.com/watch/?v={vid_id}",
+                         f"https://m.facebook.com/watch/?v={vid_id}",
+                         f"https://www.facebook.com/reel/{vid_id}",
+                     ]:
+                         if v != url: fb_retry_urls.append(v)
+             
+             # Run & Parse Output Realtime (with Facebook retry on parse error)
+             attempt_urls = [url] + fb_retry_urls
+             download_succeeded = False
+             for attempt_idx, attempt_url in enumerate(attempt_urls):
+              if self.stop_download_flag: break
+              if download_succeeded: break
+              
+              if attempt_idx > 0:
+                  current_cmd = cmd[:-1] + [attempt_url]
+                  update_status(f"🔄 Thử URL khác...", COLORS["blue_primary"])
+                  print(f"  FB retry #{attempt_idx+1}: {attempt_url}")
+              else:
+                  current_cmd = cmd
+              
+              try:
+                 process = subprocess.Popen(current_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore', creationflags=SUBPROCESS_FLAGS)
                  
                  found_error = None
                  while True:
@@ -1856,8 +1883,16 @@ class VideoDownloaderApp(ctk.CTk):
                  if status_ok:
                      update_status("✅ Hoàn tất", COLORS["green_success"])
                      success_count += 1
-                     if item.get('id'): self.add_to_history(item.get('id')) 
+                     download_succeeded = True
+                     if item.get('id'): self.add_to_history(item.get('id'))
+                     break  # Success - exit retry loop
                  else:
+                     # Check if this is a Facebook parse error and we have retries left
+                     is_parse_error = found_error and "Cannot parse data" in found_error
+                     if is_parse_error and attempt_idx < len(attempt_urls) - 1:
+                         print(f"  FB parse error, trying next URL variant...")
+                         continue  # Try next URL variant
+                     
                      # Translate Error
                      fail_msg = found_error if found_error else "Lỗi tải"
                      viet_msg = fail_msg
@@ -1882,11 +1917,11 @@ class VideoDownloaderApp(ctk.CTk):
                      self.gui_queue.put(update_err_gui)
                      print(f"Fail: {viet_msg}")
 
-             except Exception as e:
-                 print(f"Exec Error: {e}")
-                 err_str = str(e)
-                 if len(err_str) > 25: err_str = err_str[:22] + "..."
-                 update_status(f"❌ {err_str}", "red")
+              except Exception as e:
+                  print(f"Exec Error: {e}")
+                  err_str = str(e)
+                  if len(err_str) > 25: err_str = err_str[:22] + "..."
+                  update_status(f"❌ {err_str}", "red")
         # Restore Cancel Button
         self.gui_queue.put(lambda: self.btn_cancel.configure(text="Hủy bỏ", command=original_cancel_cmd, fg_color="transparent", hover_color="#e5e7eb"))
         self.gui_queue.put(lambda: self.btn_download.configure(state="normal", text=f"Tải Xuống ({success_count}/{total})")) 
